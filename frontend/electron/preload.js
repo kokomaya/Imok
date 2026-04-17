@@ -26,6 +26,7 @@ const INVOKE_CHANNELS = [
   'overlay:close',
   'overlay:set-click-through',
   'overlay:set-always-on-top',
+  'mute-panel:toggle',
 ];
 
 /** 允许从 main 发往 renderer 的 on 通道 */
@@ -36,6 +37,7 @@ const RECEIVE_CHANNELS = [
   'python:exit',
   'python:restart',
   'python:bridge-error',
+  'mute-panel:toggle',
 ];
 
 // ---------------------------------------------------------------
@@ -109,6 +111,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   setOverlayAlwaysOnTop: (enabled) => {
     return ipcRenderer.invoke('overlay:set-always-on-top', enabled);
+  },
+
+  /**
+   * 切换闭麦面板可见性。
+   * @returns {Promise<{ ok: boolean }>}
+   */
+  toggleMutePanel: () => {
+    return ipcRenderer.invoke('mute-panel:toggle');
   },
 
   /**

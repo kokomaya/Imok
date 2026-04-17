@@ -8,7 +8,7 @@
  * 生产模式：加载打包后的 dist/index.html
  */
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
 const path = require('path');
 const { PythonBridge } = require('./python-bridge');
 const { WindowManager } = require('./window-manager');
@@ -130,6 +130,12 @@ function setupIPC() {
     windowManager.setAlwaysOnTop(enabled);
     return { ok: true };
   });
+
+  // 闭麦面板可见性切换（由快捷键触发，转发到 renderer）
+  ipcMain.handle('mute-panel:toggle', () => {
+    mainWindow?.webContents.send('mute-panel:toggle');
+    return { ok: true };
+  });
 }
 
 // ---------------------------------------------------------------
@@ -193,6 +199,20 @@ function initPythonBridge() {
 }
 
 // ---------------------------------------------------------------
+// 全局快捷键
+// ---------------------------------------------------------------
+
+/**
+ * 注册全局快捷键。
+ */
+function registerShortcuts() {
+  // Ctrl+Shift+M: 切换闭麦面板
+  globalShortcut.register('CommandOrControl+Shift+M', () => {
+    mainWindow?.webContents.send('mute-panel:toggle');
+  });
+}
+
+// ---------------------------------------------------------------
 // 应用生命周期
 // ---------------------------------------------------------------
 
@@ -200,6 +220,7 @@ app.whenReady().then(() => {
   setupIPC();
   createMainWindow();
   initPythonBridge();
+  registerShortcuts();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -209,6 +230,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  globalShortcut.unregisterAll();
   if (pythonBridge) {
     pythonBridge.destroy();
     pythonBridge = null;

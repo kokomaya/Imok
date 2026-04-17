@@ -633,7 +633,7 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 1 天 |
 | 产出文件 | `frontend/src/components/MuteAssistPanel/` |
@@ -641,15 +641,34 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.9.1 实现 `MuteAssistPanel` 组件：
+- [x] 2.9.1 实现 `MuteAssistPanel` 组件：
   - 中文文本输入框
   - 英文输出展示区（支持 Streaming 逐字显示）
   - 一键复制按钮（复制到系统剪贴板）
   - 输入模式切换：键盘 / 麦克风
-- [ ] 2.9.2 实现键盘输入 → 直接调用 LLM API Streaming → 接收英文结果
-- [ ] 2.9.3 实现麦克风输入模式的 UI 状态（录音中/处理中/已完成）
-- [ ] 2.9.4 快捷键注册：`Ctrl+Shift+M` 激活/隐藏面板
-- [ ] 2.9.5 基础样式与交互动效
+- [x] 2.9.2 实现键盘输入 → 直接调用 LLM API Streaming → 接收英文结果
+- [x] 2.9.3 实现麦克风输入模式的 UI 状态（录音中/处理中/已完成）
+- [x] 2.9.4 快捷键注册：`Ctrl+Shift+M` 激活/隐藏面板
+- [x] 2.9.5 基础样式与交互动效
+
+**实现摘要：**
+
+| 文件 | 说明 |
+| --- | --- |
+| `frontend/src/stores/mute-assist-store.js` | 闭麦面板响应式状态（inputMode/micStatus/outputText/history/visible/copied） |
+| `frontend/src/services/expression-service.js` | 表达服务：fetch() SSE Streaming 调用 LLM API，abort() 中断 |
+| `frontend/src/components/MuteAssistPanel/MuteAssistPanel.vue` | 完整组件：键盘/麦克风模式切换、Streaming 输出、复制/清空/中断、历史记录 |
+| `frontend/src/components/MuteAssistPanel/index.js` | Barrel export |
+| `frontend/electron/main.js` | 新增 globalShortcut (Ctrl+Shift+M)、mute-panel:toggle IPC |
+| `frontend/electron/preload.js` | 新增 mute-panel:toggle 通道、toggleMutePanel() API |
+| `frontend/src/App.vue` | 集成 MuteAssistPanel、闭麦助手按钮、toggle 监听 |
+
+**验证结果：**
+
+| 检查项 | 结果 |
+| --- | --- |
+| Vite build (24 modules) | ✅ 通过 |
+| Python 回归 (240 tests) | ✅ 全部通过 |
 
 ---
 
@@ -1067,7 +1086,7 @@ Phase 3:
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
 | Phase 1a（核心链路） | 6 | 6 | 100% |
-| Phase 1b（翻译+UI） | 10 | 8 | 80% |
+| Phase 1b（翻译+UI） | 10 | 9 | 90% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **14** | **41%** |
+| **总计** | **34** | **15** | **44%** |

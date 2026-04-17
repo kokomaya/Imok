@@ -2,6 +2,8 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useHashRoute } from '@/router.js';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
+import { MuteAssistPanel } from '@/components/MuteAssistPanel';
+import { muteAssistStore } from '@/stores/mute-assist-store.js';
 
 const { currentRoute } = useHashRoute();
 
@@ -40,6 +42,12 @@ onMounted(() => {
       console.error('[Python Error]', data);
     }),
   );
+
+  cleanupFns.push(
+    window.electronAPI.on('mute-panel:toggle', () => {
+      muteAssistStore.toggleVisible();
+    }),
+  );
 });
 
 onUnmounted(() => {
@@ -66,11 +74,21 @@ function openOverlay() {
         <button class="btn-overlay" @click="openOverlay" title="打开悬浮字幕">
           字幕窗
         </button>
+        <button
+          class="btn-mute-panel"
+          @click="muteAssistStore.toggleVisible()"
+          title="闭麦表达助手 (Ctrl+Shift+M)"
+        >
+          闭麦助手
+        </button>
         <span class="status-badge" :class="status">{{ status }}</span>
       </div>
     </header>
 
     <main class="content">
+      <!-- 闭麦表达助手 -->
+      <MuteAssistPanel />
+
       <section class="transcription-panel">
         <h2>实时字幕</h2>
         <div class="transcription-list">
@@ -128,6 +146,21 @@ function openOverlay() {
 .btn-overlay:hover {
   background: #e3f2fd;
   border-color: #90caf9;
+}
+
+.btn-mute-panel {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+
+.btn-mute-panel:hover {
+  background: #fff3e0;
+  border-color: #ffb74d;
 }
 
 .title {
