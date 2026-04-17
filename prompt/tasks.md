@@ -362,7 +362,7 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 1 天 |
 | 产出文件 | `translation/translator.py`, `translation/request_batcher.py`, `translation/context_window.py` |
@@ -370,20 +370,30 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.3.1 实现 `ContextWindow`（`translation/context_window.py`）：
+- [x] 2.3.1 实现 `ContextWindow`（`translation/context_window.py`）：
   - 维护最近 3 句已翻译内容
   - 提供格式化上下文字符串
-- [ ] 2.3.2 实现 `RequestBatcher`（`translation/request_batcher.py`）：
+- [x] 2.3.2 实现 `RequestBatcher`（`translation/request_batcher.py`）：
   - 500ms 内短句合并
   - 相同文本去重（与上一次输入对比）
   - 输出合并后的待翻译文本
-- [ ] 2.3.3 实现 `RealtimeTranslator`（`translation/translator.py`）：
+- [x] 2.3.3 实现 `RealtimeTranslator`（`translation/translator.py`）：
   - 依赖注入 `LLMClient`（DIP 原则）
   - 接收 ASR 转写文本，经 Batcher 合并后调用 LLM Streaming 翻译
   - 注入术语表和上下文窗口
   - 超时降级：3s 未返回时输出原文 + "翻译中" 标记
-- [ ] 2.3.4 实现翻译结果回调机制（供 WebSocket 推送到前端）
-- [ ] 2.3.5 编写测试：验证合并逻辑、去重逻辑、超时降级
+- [x] 2.3.4 实现翻译结果回调机制（供 WebSocket 推送到前端）
+- [x] 2.3.5 编写测试：验证合并逻辑、去重逻辑、超时降级
+
+**实现摘要：**
+
+| 检查项 | 结果 |
+| --- | --- |
+| `context_window.py` ContextWindow | ✅ 滑动窗口 (deque maxlen=3)，format_for_prompt() |
+| `request_batcher.py` RequestBatcher | ✅ 500ms 合并窗口、相同文本去重、flush_immediate() |
+| `translator.py` RealtimeTranslator | ✅ DIP 注入 LLMClient、Streaming 翻译、超时/离线/错误降级 |
+| 回调机制 | ✅ on_translation() 多回调支持 |
+| 单元测试 (34 个) | ✅ 全部通过 |
 
 ---
 
@@ -954,7 +964,7 @@ Phase 3:
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
 | Phase 1a（核心链路） | 6 | 6 | 100% |
-| Phase 1b（翻译+UI） | 10 | 2 | 20% |
+| Phase 1b（翻译+UI） | 10 | 3 | 30% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **8** | **24%** |
+| **总计** | **34** | **9** | **26%** |
