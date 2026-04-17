@@ -1,0 +1,71 @@
+{
+  "timestamp": "2026-04-17T15:13:18.639328",
+  "checks": [
+    {
+      "name": "IPC Protocol",
+      "passed": true,
+      "message": "All 6 message types serialize/deserialize correctly",
+      "duration_s": 0.00661739999850397
+    },
+    {
+      "name": "SubprocessWriter",
+      "passed": true,
+      "message": "Thread-safe writing, close behavior verified",
+      "duration_s": 0.0008183999998436775
+    },
+    {
+      "name": "SubprocessReader",
+      "passed": true,
+      "message": "Async reading and message dispatch verified",
+      "duration_s": 0.3027899999979127
+    },
+    {
+      "name": "Subprocess Roundtrip",
+      "passed": true,
+      "message": "Subprocess: spawn → READY → stop → exit (code=0) in 7.68s",
+      "duration_s": 7.682377900000574
+    },
+    {
+      "name": "Translation Modules",
+      "passed": true,
+      "message": "ContextWindow, RequestBatcher, RealtimeTranslator importable and functional",
+      "duration_s": 0.2912434000027133
+    },
+    {
+      "name": "Expression Modules",
+      "passed": true,
+      "message": "SceneManager (4 scenes), PromptManager, GlossaryManager OK",
+      "duration_s": 0.16927139999825158
+    },
+    {
+      "name": "MutePipeline Modes",
+      "passed": true,
+      "message": "KEYBOARD and VOICE modes importable, pipeline module OK",
+      "duration_s": 0.002973900001961738
+    },
+    {
+      "name": "Frontend Modules",
+      "passed": true,
+      "message": "All 16 modules present, key exports/integrations verified",
+      "duration_s": 0.0034718999995675404
+    },
+    {
+      "name": "Frontend Build",
+      "passed": true,
+      "message": "Vite build passed: 24 modules",
+      "duration_s": 6.909730399998807
+    },
+    {
+      "name": "Python Tests",
+      "passed": true,
+      "message": "240 tests passed",
+      "duration_s": 19.34188129999893
+    }
+  ],
+  "latency_measurements": [],
+  "total_passed": 10,
+  "total_failed": 0,
+  "avg_first_token_latency_s": 0.0,
+  "avg_total_latency_s": 0.0,
+  "errors": []
+}
