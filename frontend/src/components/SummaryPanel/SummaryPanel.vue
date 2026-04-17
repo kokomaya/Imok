@@ -9,6 +9,46 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import { summaryStore } from '@/stores/summary-store.js';
 
+const triggeringSegment = ref(false);
+const triggeringGlobal = ref(false);
+const summaryInterval = ref(60);
+
+const INTERVAL_OPTIONS = [
+  { label: '1分钟', value: 60 },
+  { label: '2分钟', value: 120 },
+  { label: '3分钟', value: 180 },
+  { label: '5分钟', value: 300 },
+  { label: '10分钟', value: 600 },
+];
+
+async function onIntervalChange(event) {
+  const val = Number(event.target.value);
+  summaryInterval.value = val;
+  if (window.electronAPI) {
+    await window.electronAPI.sendControl('set_summary_interval', { interval_s: val });
+  }
+}
+
+async function triggerSegmentSummary() {
+  if (!window.electronAPI || triggeringSegment.value) return;
+  triggeringSegment.value = true;
+  try {
+    await window.electronAPI.sendControl('trigger_segment_summary');
+  } finally {
+    triggeringSegment.value = false;
+  }
+}
+
+async function triggerGlobalSummary() {
+  if (!window.electronAPI || triggeringGlobal.value) return;
+  triggeringGlobal.value = true;
+  try {
+    await window.electronAPI.sendControl('trigger_global_summary');
+  } finally {
+    triggeringGlobal.value = false;
+  }
+}
+
 const activeTab = ref('overview');
 const timelineRef = ref(null);
 
@@ -90,33 +130,65 @@ function formatUpdatedTime(segment) {
 </script>
 
 <template>
-  <div class="summary-panel" v-show="summaryStore.state.visible && (hasContent || summaryStore.state.globalSummary)">
+  <div class="summary-panel" v-show="summaryStore.state.visible">
     <!-- 标题栏 -->
     <div class="panel-header">
       <span class="panel-title">📋 会议摘要</span>
-      <div class="tab-bar">
-        <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'overview' }"
-          @click="activeTab = 'overview'"
-        >
-          概览
-        </button>
-        <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'actions' }"
-          @click="activeTab = 'actions'"
-        >
-          待办
-          <span v-if="actionItems.length" class="tab-badge">{{ actionItems.length }}</span>
-        </button>
-        <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'timeline' }"
-          @click="activeTab = 'timeline'"
-        >
-          时间线
-        </button>
+      <div class="header-right">
+        <div class="trigger-bar">
+          <label class="interval-label" title="自动摘要间隔（60秒 ~ 10分钟）">
+            ⏱
+            <select class="interval-select" :value="summaryInterval" @change="onIntervalChange">
+              <option
+                v-for="opt in INTERVAL_OPTIONS"
+                :key="opt.value"
+                :value="opt.value"
+              >
+                {{ opt.label }}
+              </option>
+            </select>
+          </label>
+          <button
+            class="trigger-btn"
+            @click="triggerSegmentSummary"
+            :disabled="triggeringSegment"
+            title="立即生成当前段落摘要"
+          >
+            {{ triggeringSegment ? '⏳' : '📝' }} 段落摘要
+          </button>
+          <button
+            class="trigger-btn primary"
+            @click="triggerGlobalSummary"
+            :disabled="triggeringGlobal"
+            title="生成全局会议总结（含所有段落）"
+          >
+            {{ triggeringGlobal ? '⏳' : '📊' }} 全局总结
+          </button>
+        </div>
+        <div class="tab-bar">
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'overview' }"
+            @click="activeTab = 'overview'"
+          >
+            概览
+          </button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'actions' }"
+            @click="activeTab = 'actions'"
+          >
+            待办
+            <span v-if="actionItems.length" class="tab-badge">{{ actionItems.length }}</span>
+          </button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'timeline' }"
+            @click="activeTab = 'timeline'"
+          >
+            时间线
+          </button>
+        </div>
       </div>
     </div>
 
@@ -161,7 +233,7 @@ function formatUpdatedTime(segment) {
       <!-- 空状态 -->
       <div v-if="!hasContent && !globalRawText" class="empty-state">
         <div class="empty-icon">📝</div>
-        <div class="empty-text">会议摘要将在这里实时更新</div>
+        <div class="empty-text">会议开始后自动生成摘要，或点击上方按钮手动触发</div>
       </div>
     </div>
 
@@ -260,12 +332,84 @@ function formatUpdatedTime(segment) {
   padding: 8px 12px;
   background: #f5f5f5;
   border-bottom: 1px solid #e0e0e0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .panel-title {
   font-size: 13px;
   font-weight: 600;
   color: #333;
+}
+
+.trigger-bar {
+  display: flex;
+  gap: 4px;
+}
+
+.trigger-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.trigger-btn:hover:not(:disabled) {
+  background: #e3f2fd;
+  border-color: #90caf9;
+  color: #1565c0;
+}
+
+.trigger-btn.primary {
+  background: #e3f2fd;
+  border-color: #90caf9;
+  color: #1565c0;
+}
+
+.trigger-btn.primary:hover:not(:disabled) {
+  background: #1976d2;
+  border-color: #1976d2;
+  color: #fff;
+}
+
+.trigger-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.interval-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #666;
+  cursor: pointer;
+}
+
+.interval-select {
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #fff;
+  color: #555;
+  cursor: pointer;
+  outline: none;
+}
+
+.interval-select:hover {
+  border-color: #90caf9;
 }
 
 .tab-bar {

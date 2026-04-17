@@ -134,6 +134,17 @@ class TimeWindowManager:
         self._window_start = 0.0
         self._window_end = self._window_duration
 
+    def set_window_duration(self, duration_s: float) -> None:
+        """运行时更新窗口时长。当前窗口立即采用新时长。"""
+        if duration_s <= 0:
+            raise ValueError("window_duration_s must be positive")
+        if self._overlap >= duration_s:
+            self._overlap = max(0.0, duration_s * 0.15)
+        self._window_duration = duration_s
+        # 调整当前窗口结束点（从当前窗口起点重新计算）
+        self._window_end = self._window_start + duration_s
+        logger.info("Window duration updated to %.0fs", duration_s)
+
     @property
     def window_index(self) -> int:
         return self._window_index

@@ -475,6 +475,19 @@ async def _run_subprocess(source_type: str) -> None:
                 writer.write(
                     IPCMessage.error("invalid_source", f"Unknown source: {new_source}")
                 )
+        elif action == ControlAction.TRIGGER_SEGMENT_SUMMARY:
+            asyncio.run_coroutine_threadsafe(_do_trigger_segment_summary(), main_loop)
+        elif action == ControlAction.TRIGGER_GLOBAL_SUMMARY:
+            asyncio.run_coroutine_threadsafe(_do_trigger_global_summary(), main_loop)
+        elif action == ControlAction.SET_SUMMARY_INTERVAL:
+            interval = message.data.get("interval_s")
+            if isinstance(interval, (int, float)) and interval > 0:
+                if summary_coordinator is not None:
+                    summary_coordinator.set_summary_interval(float(interval))
+                else:
+                    logger.warning("Cannot set summary interval: coordinator not initialized")
+            else:
+                writer.write(IPCMessage.error("invalid_interval", f"Invalid interval: {interval}"))
         else:
             logger.warning("Unknown control action: %s", action)
 
@@ -497,6 +510,26 @@ async def _run_subprocess(source_type: str) -> None:
             pipeline = await _start_pipeline(new_source)
         except Exception:
             pass
+
+    async def _do_trigger_segment_summary() -> None:
+        if summary_coordinator is None:
+            writer.write(IPCMessage.error("summary_unavailable", "Summary coordinator not initialized"))
+            return
+        try:
+            await summary_coordinator.trigger_segment_summary()
+        except Exception:
+            logger.exception("Manual segment summary trigger failed")
+            writer.write(IPCMessage.error("summary_error", "Failed to trigger segment summary"))
+
+    async def _do_trigger_global_summary() -> None:
+        if summary_coordinator is None:
+            writer.write(IPCMessage.error("summary_unavailable", "Summary coordinator not initialized"))
+            return
+        try:
+            await summary_coordinator.trigger_global_summary()
+        except Exception:
+            logger.exception("Manual global summary trigger failed")
+            writer.write(IPCMessage.error("summary_error", "Failed to trigger global summary"))
 
     # 设置 stdin 读取器
     reader = SubprocessReader()

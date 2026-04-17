@@ -197,6 +197,38 @@ class SummaryCoordinator:
         self._time_window.reset()
         self._merger.reset()
 
+    def set_summary_interval(self, interval_s: float) -> None:
+        """设置自动摘要的时间窗口间隔（秒）。
+
+        Args:
+            interval_s: 间隔秒数，范围 [60, 600]。
+        """
+        clamped = max(60.0, min(600.0, interval_s))
+        self._time_window.set_window_duration(clamped)
+        logger.info("Summary interval set to %.0fs", clamped)
+
+    async def trigger_segment_summary(self) -> None:
+        """手动触发段落摘要 — 刷出当前时间窗口，立即生成段落摘要。"""
+        self._time_window.flush()
+        # flush 会通过回调将窗口内容放入队列，worker 会自动处理
+        # 等待队列中所有待处理窗口完成
+        if not self._window_queue.empty():
+            try:
+                await asyncio.wait_for(self._window_queue.join(), timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.warning("Manual segment summary timed out")
+
+    async def trigger_global_summary(self) -> None:
+        """手动触发全局摘要 — 先刷出段落，再强制合并所有已有段落为全局摘要。"""
+        # 先刷出当前时间窗口的段落摘要
+        await self.trigger_segment_summary()
+
+        # 强制合并所有段落摘要为全局摘要
+        summary = await self._merger.force_merge()
+        if summary and not summary.is_empty:
+            items = self._extractor.extract_from_text(summary.raw_text)
+            self._notify_global(summary, items)
+
     @property
     def global_summary(self) -> Optional[GlobalSummary]:
         return self._merger.global_summary
