@@ -10,7 +10,7 @@
 ```text
 imok/
 ├── backend/                          # Python 后端
-│   ├── main.py                       # FastAPI 应用入口
+│   ├── main.py                       # 应用入口（CLI / 子进程模式）
 │   ├── config.py                     # 全局配置（环境检测、模型选择）
 │   ├── audio/                        # 音频采集模块
 │   │   ├── __init__.py
@@ -53,10 +53,10 @@ imok/
 │   │   ├── __init__.py
 │   │   ├── meeting_pipeline.py       # 主会议流水线（组合各模块，SRP）
 │   │   └── mute_pipeline.py          # 闭麦辅助流水线
-│   └── ws/                           # WebSocket 通信模块
+│   └── ipc/                          # 进程间通信模块
 │       ├── __init__.py
-│       ├── server.py                 # WebSocket 服务端
-│       └── messages.py               # 消息协议定义
+│       ├── messages.py               # IPC 消息协议定义（JSON Lines）
+│       └── subprocess_io.py          # 子进程 stdin/stdout I/O
 ├── frontend/                         # Electron 前端
 │   ├── main.js                       # Electron 主进程
 │   ├── preload.js                    # 预加载脚本
@@ -70,7 +70,8 @@ imok/
 │   │   │   ├── SettingsPanel/        # 设置面板组件
 │   │   │   └── common/               # 公共 UI 组件
 │   │   ├── services/
-│   │   │   └── ws-client.ts          # WebSocket 客户端
+│   │   │   ├── ipc-bridge.ts         # Python 子进程 IPC 桥接
+│   │   │   └── llm-client.ts         # 直连远程 LLM API 客户端
 │   │   ├── stores/                   # 状态管理
 │   │   └── styles/                   # 全局样式
 │   └── electron/
@@ -99,6 +100,35 @@ imok/
 | **L** - 里氏替换 | `WhisperEngine` 和 `AzureEngine` 可互换使用，不影响上层调用 |
 | **I** - 接口隔离 | `AudioSource` 仅暴露 `start/stop/read` 接口，不强制实现无关方法 |
 | **D** - 依赖倒置 | `Translator` 依赖 `LLMClient` 抽象接口，不依赖具体实现 |
+
+**通信架构（无服务器模式）：**
+
+```text
+┌─────────────────────────────────┐     ┌──────────────────┐
+│  Electron 客户端                │     │  远程 LLM API    │
+│  ┌───────────┐  ┌────────────┐  │     │  (OpenAI 兼容)   │
+│  │ Renderer  │  │ Main Proc  │  │     └────────┬─────────┘
+│  │ (UI/翻译/ │  │ (子进程    │  │              │
+│  │  表达/总结)│←→│  管理/IPC) │  │              │
+│  └─────┬─────┘  └─────┬──────┘  │              │
+│        │              │         │              │
+│        │    HTTP/SSE   │ JSON    │              │
+│        │──────────────►│ Lines   │              │
+│        │   (LLM 调用)  │ stdin/  │              │
+│        │              │ stdout  │              │
+└────────│──────────────┼─────────┘              │
+         │              │                        │
+         │              ▼                        │
+         │     ┌─────────────────┐               │
+         │     │ Python 子进程   │               │
+         │     │ (音频→VAD→ASR)  │               │
+         │     └─────────────────┘               │
+         └───────────────────────────────────────┘
+```
+
+- **Python 子进程**：仅负责音频采集 + VAD + ASR，通过 stdout 输出 JSON Lines 转写结果
+- **Electron 主进程**：管理 Python 子进程，通过 stdin/stdout 双向通信
+- **Electron 渲染进程**：直接调用远程 LLM API 进行翻译/表达辅助/总结（无服务器中间层）
 
 ---
 
@@ -425,41 +455,49 @@ imok/
 
 ---
 
-### Task 2.5 WebSocket 通信层
+### Task 2.5 进程间通信协议（IPC）
 
 | 属性 | 值 |
 | --- | --- |
 | 状态 | ⬜ 未开始 |
 | 优先级 | P0 |
 | 预估 | 1 天 |
-| 产出文件 | `ws/server.py`, `ws/messages.py` |
-| 依赖 | Task 2.3, 2.4 |
+| 产出文件 | `ipc/messages.py`, `ipc/subprocess_io.py` |
+| 依赖 | Task 1.5 |
+
+> **架构变更**：去掉 FastAPI/WebSocket 服务器层。Python 仅作为 Electron 的子进程运行
+> （音频 → VAD → ASR），通过 stdin/stdout JSON Lines 通信。翻译、表达辅助、总结
+> 由 Electron 前端直接调用远程 LLM API（OpenAI 兼容），不经过 Python 中间层。
 
 **子步骤：**
 
-- [ ] 2.5.1 定义 WebSocket 消息协议（`ws/messages.py`）：
+- [ ] 2.5.1 定义 IPC 消息协议（`ipc/messages.py`）：
   ```python
-  # 消息类型枚举
   class MessageType(str, Enum):
-      TRANSCRIPTION = "transcription"        # ASR 转写结果
-      TRANSLATION = "translation"            # 翻译结果
-      EXPRESSION = "expression"              # 闭麦辅助结果
-      SUMMARY_UPDATE = "summary_update"      # 摘要更新
-      STATUS = "status"                      # 系统状态
-      MUTE_INPUT = "mute_input"              # 闭麦文本输入（前端→后端）
-      CONTROL = "control"                    # 控制命令（开始/停止/切换模式）
+      # Python → Electron（stdout）
+      TRANSCRIPTION = "transcription"   # ASR 转写结果
+      STATUS = "status"                 # 子进程状态（ready/running/stopped/error）
+      ERROR = "error"                   # 错误通知
+      # Electron → Python（stdin）
+      CONTROL = "control"              # 控制命令（start/stop/switch_source）
   ```
-- [ ] 2.5.2 实现 WebSocket 服务端（`ws/server.py`）：
-  - 基于 FastAPI WebSocket
-  - 支持多客户端连接
-  - 实现消息分发（按类型路由到对应处理器）
-- [ ] 2.5.3 实现后端 → 前端推送（转写、翻译、表达结果的实时推送）
-- [ ] 2.5.4 实现前端 → 后端接收（闭麦文本输入、控制命令）
-- [ ] 2.5.5 编写 WebSocket 集成测试
+  > 注：翻译/表达/总结消息不再经过 IPC，前端直接调用远程 LLM API。
+- [ ] 2.5.2 实现 `IPCMessage` 数据类与序列化（JSON Lines 格式，每行一个 JSON）
+- [ ] 2.5.3 实现 `SubprocessWriter`（`ipc/subprocess_io.py`）：
+  - 向 stdout 写入 JSON Lines（供 Electron 主进程读取）
+  - 线程安全（ASR 回调可能在不同线程）
+- [ ] 2.5.4 实现 `SubprocessReader`（`ipc/subprocess_io.py`）：
+  - 从 stdin 读取 JSON Lines（接收 Electron 控制命令）
+  - 异步 readline + 分发到处理器
+- [ ] 2.5.5 更新 `main.py` 新增 `--mode=subprocess` 模式：
+  - 与 `cli` 模式共享 Pipeline 逻辑
+  - 转写回调改为写 JSON Lines 到 stdout（替代 print）
+  - stdin 监听控制命令（start/stop/switch_source）
+- [ ] 2.5.6 编写测试：验证消息序列化/反序列化、I/O 协议
 
 ---
 
-### Task 2.6 FastAPI 应用入口
+### Task 2.6 子进程入口与 Electron 集成
 
 | 属性 | 值 |
 | --- | --- |
@@ -471,13 +509,17 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.6.1 编写 `main.py` FastAPI 应用：
-  - 生命周期管理（startup: 初始化模块，shutdown: 清理资源）
-  - 挂载 WebSocket 端点 (`/ws`)
-  - 提供 REST 端点：`GET /status`（系统状态）、`GET /devices`（音频设备列表）
-- [ ] 2.6.2 实现模块组装（依赖注入：AudioSource → VAD → ASR → Translator → Pipeline）
-- [ ] 2.6.3 实现启动参数：`--mode=cli|server`、`--port`、`--model-size`
-- [ ] 2.6.4 编写启动脚本
+- [ ] 2.6.1 完善 `main.py --mode=subprocess`：
+  - 启动时向 stdout 写入 `{"type": "status", "data": {"state": "ready"}}` 
+  - 收到 stdin `control:start` 后开始 Pipeline
+  - 收到 stdin `control:stop` 后优雅停止
+  - 所有日志输出到 stderr（不干扰 stdout JSON Lines 协议）
+- [ ] 2.6.2 编写 Electron 端子进程管理器原型（`frontend/electron/python-bridge.js`）：
+  - `child_process.spawn()` 启动 Python
+  - 按行读取 stdout → 解析 JSON → 通过 IPC 转发到 Renderer
+  - 进程异常退出自动重启
+- [ ] 2.6.3 保留 `--mode=cli` 用于独立调试
+- [ ] 2.6.4 编写集成测试：模拟 stdin 控制命令，验证 stdout 输出格式
 
 ---
 
@@ -521,11 +563,14 @@ imok/
   - 显示最近 5 条双语字幕
   - 自动滚动
   - 时间戳 + 说话者标注
-- [ ] 2.8.3 实现 WebSocket 客户端（`services/ws-client.ts`）：
-  - 连接 `ws://localhost:{port}/ws`
-  - 自动重连机制
-  - 按消息类型分发到 store
-- [ ] 2.8.4 实现字幕状态管理 store
+- [ ] 2.8.3 实现 IPC 桥接服务（`services/ipc-bridge.ts`）：
+  - Electron 主进程管理 Python 子进程
+  - 按行读取 stdout JSON Lines → 通过 Electron IPC 转发到 Renderer
+  - Renderer 按消息类型分发到 store
+- [ ] 2.8.4 实现 LLM 直连客户端（`services/llm-client.ts`）：
+  - 读取 `config/llm_providers.yaml` 配置
+  - 使用 `fetch()` 直接调用远程 LLM API（OpenAI 兼容 SSE Streaming）
+  - 翻译 ASR 转写文本 → Streaming 输出双语字幕
 - [ ] 2.8.5 基础样式：半透明背景、可读字体、紧凑布局
 
 ---
@@ -547,7 +592,7 @@ imok/
   - 英文输出展示区（支持 Streaming 逐字显示）
   - 一键复制按钮（复制到系统剪贴板）
   - 输入模式切换：键盘 / 麦克风
-- [ ] 2.9.2 实现键盘输入 → WebSocket 发送 → 接收英文结果
+- [ ] 2.9.2 实现键盘输入 → 直接调用 LLM API Streaming → 接收英文结果
 - [ ] 2.9.3 实现麦克风输入模式的 UI 状态（录音中/处理中/已完成）
 - [ ] 2.9.4 快捷键注册：`Ctrl+Shift+M` 激活/隐藏面板
 - [ ] 2.9.5 基础样式与交互动效
@@ -565,8 +610,8 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.10.1 启动 Python 后端 + Electron 前端，验证 WebSocket 连接
-- [ ] 2.10.2 在 Teams 会议中测试：实时双语字幕显示
+- [ ] 2.10.1 启动 Electron 前端，验证 Python 子进程 IPC 通信
+- [ ] 2.10.2 在 Teams 会议中测试：ASR 转写 → 前端直连 LLM API → 实时双语字幕
 - [ ] 2.10.3 测试闭麦键盘输入 → 英文表达输出
 - [ ] 2.10.4 测试闭麦麦克风输入 → 英文表达输出
 - [ ] 2.10.5 测量翻译首字延迟（目标 < 1 秒）、总体字幕延迟（目标 < 4 秒）
@@ -648,13 +693,13 @@ imok/
 | 状态 | ⬜ 未开始 |
 | 优先级 | P1 |
 | 预估 | 0.5 天 |
-| 产出文件 | 更新 `pipeline/meeting_pipeline.py`, `ws/server.py` |
+| 产出文件 | 更新 `pipeline/meeting_pipeline.py`, 前端总结服务 |
 | 依赖 | Task 3.1, 3.2, 3.3 |
 
 **子步骤：**
 
 - [ ] 3.4.1 在 `MeetingPipeline` 中集成总结模块（ASR 文本同时送入翻译和总结分支）
-- [ ] 3.4.2 通过 WebSocket 推送摘要更新到前端
+- [ ] 3.4.2 前端通过 LLM API 直接调用总结（或在 Python 子进程中完成后通过 IPC 推送）
 - [ ] 3.4.3 集成测试
 
 ---
@@ -676,7 +721,7 @@ imok/
   - 关键结论列表（按主题归类）
   - Action Items 列表（含状态标记）
   - 会议时间线（主题切换时间点可视化）
-- [ ] 3.5.2 实现摘要状态 store（接收 WebSocket 推送更新）
+- [ ] 3.5.2 实现摘要状态 store（接收 IPC 转写数据，定时调用 LLM API 生成摘要）
 - [ ] 3.5.3 样式与布局
 
 ---
@@ -940,9 +985,13 @@ Phase 1a:
   1.1 ──→ 1.2 ──→ 1.3 ──→ 1.4 ──→ 1.5 ──→ 1.6
                                       ↓
 Phase 1b:                            2.4
-  1.1 ──→ 2.1 ──→ 2.2 ──→ 2.3 ──┐
-                                   ├──→ 2.5 ──→ 2.6 ──→ 2.10
+  1.1 ──→ 2.1 ──→ 2.2 ──→ 2.3       │
+                                      │
+  1.5 ──→ 2.5 (IPC) ──→ 2.6 ──→ 2.10
   (独立)   2.7 ──→ 2.8 ──→ 2.9 ──┘
+
+  注：翻译/表达/总结由 Electron 前端直连 LLM API，
+      不再通过 Python 后端代理。2.5 仅负责 ASR 子进程 IPC。
 
 Phase 2:
   2.1 ──→ 3.1 ──→ 3.2 ──→ 3.3 ──→ 3.4 ──→ 3.5
