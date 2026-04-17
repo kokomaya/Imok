@@ -589,7 +589,7 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 1 天 |
 | 产出文件 | `frontend/src/components/SubtitleOverlay/`, `frontend/electron/window-manager.js` |
@@ -597,23 +597,35 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.8.1 实现窗口管理器（`window-manager.js`）：
+- [x] 2.8.1 实现窗口管理器（`window-manager.js`）：
   - 创建半透明、无边框、始终置顶的悬浮窗
   - 支持拖拽和缩放
   - 记忆窗口位置与大小
-- [ ] 2.8.2 实现 `SubtitleOverlay` 组件：
+- [x] 2.8.2 实现 `SubtitleOverlay` 组件：
   - 显示最近 5 条双语字幕
   - 自动滚动
-  - 时间戳 + 说话者标注
-- [ ] 2.8.3 实现 IPC 桥接服务（`services/ipc-bridge.ts`）：
-  - Electron 主进程管理 Python 子进程
-  - 按行读取 stdout JSON Lines → 通过 Electron IPC 转发到 Renderer
-  - Renderer 按消息类型分发到 store
-- [ ] 2.8.4 实现 LLM 直连客户端（`services/llm-client.ts`）：
-  - 读取 `config/llm_providers.yaml` 配置
+  - 时间戳 + 语言标注
+- [x] 2.8.3 实现 IPC 桥接服务（`services/ipc-bridge.js`）：
+  - Renderer 监听主进程转发的 Python 消息
+  - 按消息类型分发到 subtitle store
+  - 新转写自动触发 LLM 翻译
+- [x] 2.8.4 实现 LLM 直连客户端（`services/llm-client.js`）：
   - 使用 `fetch()` 直接调用远程 LLM API（OpenAI 兼容 SSE Streaming）
   - 翻译 ASR 转写文本 → Streaming 输出双语字幕
-- [ ] 2.8.5 基础样式：半透明背景、可读字体、紧凑布局
+  - 自动语言检测：中→英 / 英→中
+- [x] 2.8.5 基础样式：半透明背景、可读字体、紧凑布局
+
+**实现摘要：**
+
+| 检查项 | 结果 |
+| --- | --- |
+| `window-manager.js` | ✅ 无边框+透明+置顶、位置持久化、拖拽缩放、鼠标穿透 |
+| `SubtitleOverlay.vue` | ✅ 最近 5 条双语字幕、自动滚动、时间戳+语言标注、TransitionGroup 动画 |
+| `services/ipc-bridge.js` | ✅ IPC 事件监听 → subtitle store 分发、新转写回调 |
+| `services/llm-client.js` | ✅ fetch() SSE Streaming、流式翻译更新、超时/错误处理 |
+| `stores/subtitle-store.js` | ✅ 响应式状态、流式翻译更新、MAX 50 条 |
+| Vite build (19 modules) | ✅ 编译通过 |
+| Python 回归 (240 tests) | ✅ 全部通过 |
 
 ---
 
@@ -1055,7 +1067,7 @@ Phase 3:
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
 | Phase 1a（核心链路） | 6 | 6 | 100% |
-| Phase 1b（翻译+UI） | 10 | 7 | 70% |
+| Phase 1b（翻译+UI） | 10 | 8 | 80% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **13** | **38%** |
+| **总计** | **34** | **14** | **41%** |

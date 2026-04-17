@@ -1,5 +1,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
+import { useHashRoute } from '@/router.js';
+import { SubtitleOverlay } from '@/components/SubtitleOverlay';
+
+const { currentRoute } = useHashRoute();
 
 const status = ref('disconnected');
 const transcriptions = ref([]);
@@ -7,6 +11,8 @@ const transcriptions = ref([]);
 let cleanupFns = [];
 
 onMounted(() => {
+  // 主窗口视图才直接监听 IPC（overlay 有独立的 ipc-bridge 服务）
+  if (currentRoute.value !== 'main') return;
   if (!window.electronAPI) {
     status.value = 'no-electron';
     return;
@@ -40,13 +46,28 @@ onUnmounted(() => {
   cleanupFns.forEach((fn) => fn());
   cleanupFns = [];
 });
+
+function openOverlay() {
+  if (window.electronAPI) {
+    window.electronAPI.openOverlay();
+  }
+}
 </script>
 
 <template>
-  <div class="app">
+  <!-- 悬浮窗视图 -->
+  <SubtitleOverlay v-if="currentRoute === 'overlay'" />
+
+  <!-- 主窗口视图 -->
+  <div v-else class="app">
     <header class="header">
       <h1 class="title">Imok Meeting Assistant</h1>
-      <span class="status-badge" :class="status">{{ status }}</span>
+      <div class="header-actions">
+        <button class="btn-overlay" @click="openOverlay" title="打开悬浮字幕">
+          字幕窗
+        </button>
+        <span class="status-badge" :class="status">{{ status }}</span>
+      </div>
     </header>
 
     <main class="content">
@@ -86,6 +107,27 @@ onUnmounted(() => {
   padding: 12px 16px;
   border-bottom: 1px solid #e0e0e0;
   background: #fafafa;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-overlay {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+
+.btn-overlay:hover {
+  background: #e3f2fd;
+  border-color: #90caf9;
 }
 
 .title {

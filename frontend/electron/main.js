@@ -11,6 +11,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const { PythonBridge } = require('./python-bridge');
+const { WindowManager } = require('./window-manager');
 
 // ---------------------------------------------------------------
 // 常量
@@ -30,6 +31,9 @@ let mainWindow = null;
 
 /** @type {PythonBridge | null} */
 let pythonBridge = null;
+
+/** @type {WindowManager} */
+const windowManager = new WindowManager();
 
 /**
  * 创建主窗口。
@@ -105,6 +109,27 @@ function setupIPC() {
       pid: pythonBridge ? pythonBridge.pid : -1,
     };
   });
+
+  // 打开/关闭字幕悬浮窗
+  ipcMain.handle('overlay:open', () => {
+    windowManager.createOverlayWindow();
+    return { ok: true };
+  });
+
+  ipcMain.handle('overlay:close', () => {
+    windowManager.closeOverlay();
+    return { ok: true };
+  });
+
+  ipcMain.handle('overlay:set-click-through', (_event, enabled) => {
+    windowManager.setClickThrough(enabled);
+    return { ok: true };
+  });
+
+  ipcMain.handle('overlay:set-always-on-top', (_event, enabled) => {
+    windowManager.setAlwaysOnTop(enabled);
+    return { ok: true };
+  });
 }
 
 // ---------------------------------------------------------------
@@ -126,17 +151,25 @@ function initPythonBridge() {
     logLevel: IS_DEV ? 'DEBUG' : 'INFO',
   });
 
-  // Python → main → renderer 转发
+  // Python → main → renderer 转发（主窗口 + 悬浮窗）
+  const broadcast = (channel, data) => {
+    mainWindow?.webContents.send(channel, data);
+    const overlay = windowManager.overlayWindow;
+    if (overlay) {
+      overlay.webContents.send(channel, data);
+    }
+  };
+
   pythonBridge.on('transcription', (data) => {
-    mainWindow?.webContents.send('python:transcription', data);
+    broadcast('python:transcription', data);
   });
 
   pythonBridge.on('status', (data) => {
-    mainWindow?.webContents.send('python:status', data);
+    broadcast('python:status', data);
   });
 
   pythonBridge.on('python-error', (data) => {
-    mainWindow?.webContents.send('python:error', data);
+    broadcast('python:error', data);
   });
 
   pythonBridge.on('log', (text) => {
@@ -146,16 +179,16 @@ function initPythonBridge() {
   });
 
   pythonBridge.on('exit', ({ code, signal }) => {
-    mainWindow?.webContents.send('python:exit', { code, signal });
+    broadcast('python:exit', { code, signal });
   });
 
   pythonBridge.on('restart', (info) => {
-    mainWindow?.webContents.send('python:restart', info);
+    broadcast('python:restart', info);
   });
 
   pythonBridge.on('error', (data) => {
     console.error('[PythonBridge Error]', data);
-    mainWindow?.webContents.send('python:bridge-error', data);
+    broadcast('python:bridge-error', data);
   });
 }
 
@@ -180,5 +213,6 @@ app.on('window-all-closed', () => {
     pythonBridge.destroy();
     pythonBridge = null;
   }
+  windowManager.destroy();
   app.quit();
 });

@@ -22,6 +22,10 @@ const INVOKE_CHANNELS = [
   'python:start',
   'python:stop',
   'python:status',
+  'overlay:open',
+  'overlay:close',
+  'overlay:set-click-through',
+  'overlay:set-always-on-top',
 ];
 
 /** 允许从 main 发往 renderer 的 on 通道 */
@@ -71,6 +75,40 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   getPythonStatus: () => {
     return ipcRenderer.invoke('python:status');
+  },
+
+  /**
+   * 打开字幕悬浮窗。
+   * @returns {Promise<{ ok: boolean }>}
+   */
+  openOverlay: () => {
+    return ipcRenderer.invoke('overlay:open');
+  },
+
+  /**
+   * 关闭字幕悬浮窗。
+   * @returns {Promise<{ ok: boolean }>}
+   */
+  closeOverlay: () => {
+    return ipcRenderer.invoke('overlay:close');
+  },
+
+  /**
+   * 设置悬浮窗鼠标穿透。
+   * @param {boolean} enabled
+   * @returns {Promise<{ ok: boolean }>}
+   */
+  setOverlayClickThrough: (enabled) => {
+    return ipcRenderer.invoke('overlay:set-click-through', enabled);
+  },
+
+  /**
+   * 设置悬浮窗始终置顶。
+   * @param {boolean} enabled
+   * @returns {Promise<{ ok: boolean }>}
+   */
+  setOverlayAlwaysOnTop: (enabled) => {
+    return ipcRenderer.invoke('overlay:set-always-on-top', enabled);
   },
 
   /**
