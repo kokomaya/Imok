@@ -431,7 +431,7 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 1 天 |
 | 产出文件 | `expression/assistant.py`, `expression/scene_manager.py`, `config/scenes.json` |
@@ -439,19 +439,30 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.4.1 实现 `SceneManager`（`expression/scene_manager.py`）：
+- [x] 2.4.1 实现 `SceneManager`（`expression/scene_manager.py`）：
   - 从 JSON 文件加载场景配置
   - 默认场景：跨国团队内部技术讨论会
   - 支持增删自定义场景
-- [ ] 2.4.2 实现 `ExpressionAssistant`（`expression/assistant.py`）：
+- [x] 2.4.2 实现 `ExpressionAssistant`（`expression/assistant.py`）：
   - 键盘输入模式：直接文本 → LLM Streaming → 英文表达
   - 麦克风输入模式：音频 → ASR → 文本 → LLM Streaming → 英文表达
   - 注入当前场景描述和术语表到 Prompt
-- [ ] 2.4.3 实现 `MutePipeline`（`pipeline/mute_pipeline.py`）：
+- [x] 2.4.3 实现 `MutePipeline`（`pipeline/mute_pipeline.py`）：
   - 编排闭麦辅助完整链路
   - 支持在语音/键盘两种输入模式间切换
-- [ ] 2.4.4 创建默认场景配置（`config/scenes.json`）
-- [ ] 2.4.5 编写测试：验证键盘输入和语音输入两种模式
+- [x] 2.4.4 创建默认场景配置（`config/scenes.json`）
+- [x] 2.4.5 编写测试：验证键盘输入和语音输入两种模式
+
+**实现摘要：**
+
+| 检查项 | 结果 |
+| --- | --- |
+| `expression/scene_manager.py` SceneManager | ✅ JSON 加载/保存、增删查、默认场景切换 |
+| `expression/assistant.py` ExpressionAssistant | ✅ 键盘/语音双模式、Streaming、超时/离线/ASR 错误降级 |
+| `pipeline/mute_pipeline.py` MutePipeline | ✅ 编排闭麦链路、模式切换、场景切换 |
+| `config/scenes.json` | ✅ 4 场景 (internal_tech 默认, customer, supplier, expert_review) |
+| 回调机制 | ✅ on_result() + on_streaming_token() 多回调支持 |
+| 单元测试 (51 个) | ✅ 全部通过 |
 
 ---
 
@@ -1013,7 +1024,7 @@ Phase 3:
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
 | Phase 1a（核心链路） | 6 | 6 | 100% |
-| Phase 1b（翻译+UI） | 10 | 3 | 30% |
+| Phase 1b（翻译+UI） | 10 | 4 | 40% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **9** | **26%** |
+| **总计** | **34** | **10** | **29%** |
