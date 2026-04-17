@@ -5,7 +5,7 @@
 
 协议格式：每行一个 JSON 对象（JSON Lines），以 \\n 结尾。
 方向：
-    stdout (Python → Electron)：TRANSCRIPTION, STATUS, ERROR
+    stdout (Python → Electron)：TRANSCRIPTION, STATUS, ERROR, SEGMENT_SUMMARY, GLOBAL_SUMMARY
     stdin  (Electron → Python)：CONTROL
 """
 
@@ -25,6 +25,8 @@ class MessageType(str, Enum):
     TRANSCRIPTION = "transcription"  # ASR 转写结果
     STATUS = "status"  # 子进程状态
     ERROR = "error"  # 错误通知
+    SEGMENT_SUMMARY = "segment_summary"  # 段落摘要
+    GLOBAL_SUMMARY = "global_summary"  # 全局会议总结
 
     # Electron → Python (stdin)
     CONTROL = "control"  # 控制命令
@@ -85,6 +87,27 @@ class ControlData:
 
     action: str  # ControlAction value
     source: str = ""  # switch_source 时的目标音频源
+
+
+@dataclass
+class SegmentSummaryData:
+    """段落摘要数据。"""
+
+    time_range: str
+    topics: List[str] = field(default_factory=list)
+    conclusions: List[str] = field(default_factory=list)
+    action_items: List[str] = field(default_factory=list)
+    raw_text: str = ""
+
+
+@dataclass
+class GlobalSummaryData:
+    """全局会议总结数据。"""
+
+    raw_text: str
+    segments_merged: int = 0
+    merge_count: int = 0
+    action_items: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -186,3 +209,41 @@ class IPCMessage:
         """创建控制命令消息。"""
         data = ControlData(action=action.value, source=source)
         return cls(type=MessageType.CONTROL, data=asdict(data))
+
+    @classmethod
+    def segment_summary(
+        cls,
+        *,
+        time_range: str = "",
+        topics: Optional[List[str]] = None,
+        conclusions: Optional[List[str]] = None,
+        action_items: Optional[List[str]] = None,
+        raw_text: str = "",
+    ) -> "IPCMessage":
+        """创建段落摘要消息。"""
+        data = SegmentSummaryData(
+            time_range=time_range,
+            topics=topics or [],
+            conclusions=conclusions or [],
+            action_items=action_items or [],
+            raw_text=raw_text,
+        )
+        return cls(type=MessageType.SEGMENT_SUMMARY, data=asdict(data))
+
+    @classmethod
+    def global_summary(
+        cls,
+        *,
+        raw_text: str,
+        segments_merged: int = 0,
+        merge_count: int = 0,
+        action_items: Optional[List[Dict[str, Any]]] = None,
+    ) -> "IPCMessage":
+        """创建全局会议总结消息。"""
+        data = GlobalSummaryData(
+            raw_text=raw_text,
+            segments_merged=segments_merged,
+            merge_count=merge_count,
+            action_items=action_items or [],
+        )
+        return cls(type=MessageType.GLOBAL_SUMMARY, data=asdict(data))

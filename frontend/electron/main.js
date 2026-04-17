@@ -364,6 +364,14 @@ function initPythonBridge() {
     broadcast('python:error', data);
   });
 
+  pythonBridge.on('segment-summary', (data) => {
+    broadcast('python:segment-summary', data);
+  });
+
+  pythonBridge.on('global-summary', (data) => {
+    broadcast('python:global-summary', data);
+  });
+
   pythonBridge.on('log', (text) => {
     if (IS_DEV) {
       console.log('[Python]', text);

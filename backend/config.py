@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -212,3 +213,73 @@ def get_settings() -> AppSettings:
     settings.paths.ensure_dirs()
     settings.asr = settings.asr.resolve_with_gpu()
     return settings
+
+
+# ===========================================================================
+# LLM Provider YAML 配置加载
+# ===========================================================================
+
+@dataclass
+class LLMProviderConfig:
+    """从 llm_providers.yaml 解析出的完整 LLM 配置。"""
+    settings: "LLMSettings"
+    extra_headers: dict
+    ssl_verify: bool
+
+
+def load_llm_provider_config() -> LLMProviderConfig:
+    """从 llm_providers.yaml + .env 加载 LLM 提供商配置。
+
+    Returns:
+        LLMProviderConfig 包含 LLMSettings、额外请求头和 SSL 验证标志。
+
+    Falls back to default LLMSettings if YAML file not found.
+    """
+    import os
+
+    app = get_settings()
+    yaml_path = app.paths.providers_file
+
+    if not yaml_path.exists():
+        return LLMProviderConfig(
+            settings=app.llm, extra_headers={}, ssl_verify=True,
+        )
+
+    try:
+        import yaml
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+    except Exception:
+        return LLMProviderConfig(
+            settings=app.llm, extra_headers={}, ssl_verify=True,
+        )
+
+    providers = cfg.get("providers", {})
+    default_name = cfg.get("default_provider", "")
+    provider = providers.get(default_name, {})
+
+    if not provider:
+        return LLMProviderConfig(
+            settings=app.llm, extra_headers={}, ssl_verify=True,
+        )
+
+    # Resolve API token from env
+    token_env = provider.get("api_token_env", "")
+    api_key = os.environ.get(token_env, "") if token_env else ""
+
+    llm_settings = LLMSettings(
+        api_base_url=provider.get("base_url", app.llm.api_base_url),
+        api_key=api_key,
+        model_name=provider.get("model", app.llm.model_name),
+        timeout_s=float(provider.get("timeout", app.llm.timeout_s)),
+        max_retries=int(provider.get("max_retries", app.llm.max_retries)),
+    )
+
+    extra_headers = dict(provider.get("headers", {}))
+    ssl_verify = provider.get("ssl_verify", True)
+
+    return LLMProviderConfig(
+        settings=llm_settings,
+        extra_headers=extra_headers,
+        ssl_verify=ssl_verify,
+    )

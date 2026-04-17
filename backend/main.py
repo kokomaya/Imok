@@ -215,17 +215,18 @@ def _create_asr():
 async def _run_subprocess(source_type: str) -> None:
     """Subprocess 模式 — 作为 Electron 子进程运行。
 
-    通过 stdout 输出 JSON Lines 消息（转写结果、状态），
+    通过 stdout 输出 JSON Lines 消息（转写结果、摘要、状态），
     通过 stdin 接收控制命令（start/stop/switch_source）。
     所有日志输出到 stderr。
 
     生命周期：
     1. 启动 → stdout 输出 {"type": "status", "data": {"state": "ready"}}
     2. 收到 stdin control:start → 加载模型 → 启动 Pipeline → stdout RUNNING
-    3. Pipeline 运行中 → stdout 输出 transcription 消息
+    3. Pipeline 运行中 → stdout 输出 transcription / segment_summary / global_summary
     4. 收到 stdin control:stop → 停止 Pipeline → stdout STOPPED
     5. stdin EOF 或 SIGINT → 优雅退出
     """
+    from backend.config import load_llm_provider_config
     from backend.ipc.messages import (
         ControlAction,
         IPCMessage,
@@ -233,7 +234,9 @@ async def _run_subprocess(source_type: str) -> None:
         ProcessState,
     )
     from backend.ipc.subprocess_io import SubprocessReader, SubprocessWriter
+    from backend.llm.client import CompanyLLMClient
     from backend.pipeline.meeting_pipeline import MeetingPipeline, TranscriptionEvent
+    from backend.summary.summary_coordinator import SummaryCoordinator
 
     logger = logging.getLogger(__name__)
     writer = SubprocessWriter()
@@ -242,6 +245,8 @@ async def _run_subprocess(source_type: str) -> None:
     writer.write(IPCMessage.status(ProcessState.READY))
 
     pipeline = None
+    summary_coordinator = None
+    llm_client = None
     stop_event = asyncio.Event()
     current_source_type = source_type
     # 持有事件循环引用，供从 reader 线程安全调度协程
@@ -259,8 +264,45 @@ async def _run_subprocess(source_type: str) -> None:
         )
         writer.write(msg)
 
+    def _on_segment_summary(segment) -> None:
+        """段落摘要回调 → 写 JSON Lines 到 stdout。"""
+        msg = IPCMessage.segment_summary(
+            time_range=segment.time_range,
+            topics=segment.topics,
+            conclusions=segment.conclusions,
+            action_items=segment.action_items,
+            raw_text=segment.raw_text,
+        )
+        writer.write(msg)
+
+    def _on_global_summary(summary, action_items) -> None:
+        """全局摘要回调 → 写 JSON Lines 到 stdout。"""
+        items_data = [
+            {"description": ai.description, "assignee": ai.assignee,
+             "deadline": ai.deadline, "status": ai.status.value}
+            for ai in action_items
+        ]
+        msg = IPCMessage.global_summary(
+            raw_text=summary.raw_text,
+            segments_merged=summary.segments_merged,
+            merge_count=summary.merge_count,
+            action_items=items_data,
+        )
+        writer.write(msg)
+
+    def _create_llm_client():
+        """从 llm_providers.yaml 创建 LLM 客户端。"""
+        provider_cfg = load_llm_provider_config()
+        return CompanyLLMClient(
+            provider_cfg.settings,
+            extra_headers=provider_cfg.extra_headers,
+            verify_ssl=provider_cfg.ssl_verify,
+        )
+
     async def _start_pipeline(src_type: str) -> MeetingPipeline:
-        """创建并启动 Pipeline。"""
+        """创建并启动 Pipeline + SummaryCoordinator。"""
+        nonlocal summary_coordinator, llm_client
+
         writer.write(IPCMessage.status(ProcessState.LOADING, message="Loading models..."))
 
         try:
@@ -271,6 +313,20 @@ async def _run_subprocess(source_type: str) -> None:
 
             pl = MeetingPipeline(audio_src, vad, asr)
             pl.on_transcription(_on_transcription)
+
+            # 初始化总结模块（LLM 客户端 + 协调器）
+            try:
+                llm_client = _create_llm_client()
+                summary_coordinator = SummaryCoordinator(llm_client)
+                summary_coordinator.on_segment_summary(_on_segment_summary)
+                summary_coordinator.on_global_summary(_on_global_summary)
+                pl.on_transcription(summary_coordinator.feed_transcription)
+                await summary_coordinator.start()
+                logger.info("Summary coordinator initialized.")
+            except Exception:
+                logger.exception("Failed to initialize summary coordinator, continuing without summary")
+                summary_coordinator = None
+
             await pl.start()
 
             writer.write(
@@ -287,7 +343,22 @@ async def _run_subprocess(source_type: str) -> None:
             raise
 
     async def _stop_pipeline() -> None:
-        nonlocal pipeline
+        nonlocal pipeline, summary_coordinator, llm_client
+
+        if summary_coordinator is not None:
+            try:
+                await summary_coordinator.stop()
+            except Exception:
+                logger.exception("Error stopping summary coordinator")
+            summary_coordinator = None
+
+        if llm_client is not None:
+            try:
+                await llm_client.close()
+            except Exception:
+                logger.exception("Error closing LLM client")
+            llm_client = None
+
         if pipeline is not None:
             await pipeline.stop()
             pipeline = None

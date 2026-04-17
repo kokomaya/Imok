@@ -1,14 +1,15 @@
 /**
  * IPC 桥接服务 — Renderer 侧。
  *
- * 单一职责：监听 Electron IPC 事件，将 Python 子进程消息分发到 subtitle store。
+ * 单一职责：监听 Electron IPC 事件，将 Python 子进程消息分发到对应的 store。
  * 不负责翻译逻辑或 UI 渲染。
  *
  * 消息流向：
- *   Python stdout → PythonBridge (main) → IPC → preload → 本服务 → subtitleStore
+ *   Python stdout → PythonBridge (main) → IPC → preload → 本服务 → store
  */
 
 import { subtitleStore } from '@/stores/subtitle-store.js';
+import { summaryStore } from '@/stores/summary-store.js';
 
 /** @type {Function[]} 清理函数列表 */
 let cleanupFns = [];
@@ -75,6 +76,20 @@ function init(options = {}) {
   cleanupFns.push(
     window.electronAPI.on('python:bridge-error', (data) => {
       console.error('[ipc-bridge] Bridge error:', data);
+    }),
+  );
+
+  // 段落摘要 → summary store
+  cleanupFns.push(
+    window.electronAPI.on('python:segment-summary', (data) => {
+      summaryStore.addSegmentSummary(data);
+    }),
+  );
+
+  // 全局摘要 → summary store
+  cleanupFns.push(
+    window.electronAPI.on('python:global-summary', (data) => {
+      summaryStore.updateGlobalSummary(data);
     }),
   );
 }

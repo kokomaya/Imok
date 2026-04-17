@@ -39,6 +39,8 @@ const RECEIVE_CHANNELS = [
   'python:exit',
   'python:restart',
   'python:bridge-error',
+  'python:segment-summary',
+  'python:global-summary',
   'mute-panel:toggle',
 ];
 

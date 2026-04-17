@@ -243,6 +243,12 @@ class PythonBridge extends EventEmitter {
       case 'error':
         this.emit('python-error', data);
         break;
+      case 'segment_summary':
+        this.emit('segment-summary', data);
+        break;
+      case 'global_summary':
+        this.emit('global-summary', data);
+        break;
       default:
         this.emit('message', message);
     }
