@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 import threading
 import time
 from unittest.mock import MagicMock
@@ -396,3 +397,120 @@ class TestSubprocessReader:
         await asyncio.sleep(0.1)
         await reader.stop()
         await reader.stop()  # second stop should not raise
+
+
+# =========================================================================
+# 6. main.py subprocess 模式集成测试
+# =========================================================================
+class TestMainSubprocessMode:
+    """验证 main.py 的 subprocess 模式参数解析和日志配置。"""
+
+    def test_parse_args_subprocess_mode(self):
+        """--mode=subprocess 可被正确解析。"""
+        from backend.main import _parse_args
+
+        # 模拟命令行参数
+        import sys
+        original_argv = sys.argv
+        sys.argv = ["main.py", "--mode=subprocess", "--source=wasapi"]
+        try:
+            args = _parse_args()
+            assert args.mode == "subprocess"
+            assert args.source == "wasapi"
+        finally:
+            sys.argv = original_argv
+
+    def test_parse_args_subprocess_mic(self):
+        from backend.main import _parse_args
+
+        import sys
+        original_argv = sys.argv
+        sys.argv = ["main.py", "--mode=subprocess", "--source=mic"]
+        try:
+            args = _parse_args()
+            assert args.mode == "subprocess"
+            assert args.source == "mic"
+        finally:
+            sys.argv = original_argv
+
+    def test_setup_logging_stderr_only(self):
+        """stderr_only=True 模式下日志输出到 stderr。"""
+        import sys
+        from backend.main import _setup_logging
+
+        root = logging.getLogger()
+        # 清除之前的 handlers
+        original_handlers = root.handlers[:]
+        root.handlers.clear()
+
+        try:
+            _setup_logging("DEBUG", stderr_only=True)
+            assert len(root.handlers) >= 1
+            handler = root.handlers[-1]
+            assert handler.stream is sys.stderr
+        finally:
+            root.handlers = original_handlers
+
+    def test_ipc_writer_writes_status_ready(self):
+        """SubprocessWriter 可以写 READY 状态消息。"""
+        stream = io.StringIO()
+        writer = SubprocessWriter(stream=stream)
+        writer.write(IPCMessage.status(ProcessState.READY))
+
+        output = stream.getvalue().strip()
+        parsed = json.loads(output)
+        assert parsed["type"] == "status"
+        assert parsed["data"]["state"] == "ready"
+
+    def test_transcription_event_to_ipc(self):
+        """验证转写事件可以被正确转换为 IPC 消息。"""
+        msg = IPCMessage.transcription(
+            "这是一段测试文本",
+            language="zh",
+            confidence=0.92,
+            segment_start=1.0,
+            segment_end=3.5,
+        )
+        line = msg.to_json_line()
+        restored = IPCMessage.from_json_line(line)
+        assert restored.data["text"] == "这是一段测试文本"
+        assert restored.data["language"] == "zh"
+        assert restored.data["confidence"] == 0.92
+        assert restored.data["segment_start"] == 1.0
+        assert restored.data["segment_end"] == 3.5
+
+    @pytest.mark.asyncio
+    async def test_control_start_stop_roundtrip(self):
+        """验证 stdin 控制命令 start/stop 可被 SubprocessReader 正确分发。"""
+        start_msg = IPCMessage.control(ControlAction.START)
+        stop_msg = IPCMessage.control(ControlAction.STOP)
+        lines = start_msg.to_json_line() + "\n" + stop_msg.to_json_line() + "\n"
+        stream = io.StringIO(lines)
+
+        actions: list[str] = []
+        reader = SubprocessReader(stream=stream)
+        reader.on_message("control", lambda m: actions.append(m.data["action"]))
+
+        await reader.start()
+        await asyncio.sleep(0.2)
+        await reader.stop()
+
+        assert actions == ["start", "stop"]
+
+    @pytest.mark.asyncio
+    async def test_control_switch_source(self):
+        """验证 switch_source 控制命令携带 source 参数。"""
+        msg = IPCMessage.control(ControlAction.SWITCH_SOURCE, source="mic")
+        stream = io.StringIO(msg.to_json_line() + "\n")
+
+        received: list[IPCMessage] = []
+        reader = SubprocessReader(stream=stream)
+        reader.on_message("control", lambda m: received.append(m))
+
+        await reader.start()
+        await asyncio.sleep(0.2)
+        await reader.stop()
+
+        assert len(received) == 1
+        assert received[0].data["action"] == "switch_source"
+        assert received[0].data["source"] == "mic"

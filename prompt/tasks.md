@@ -470,10 +470,10 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 1 天 |
-| 产出文件 | `ipc/messages.py`, `ipc/subprocess_io.py` |
+| 产出文件 | `ipc/messages.py`, `ipc/subprocess_io.py`, `main.py` |
 | 依赖 | Task 1.5 |
 
 > **架构变更**：去掉 FastAPI/WebSocket 服务器层。Python 仅作为 Electron 的子进程运行
@@ -482,7 +482,7 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.5.1 定义 IPC 消息协议（`ipc/messages.py`）：
+- [x] 2.5.1 定义 IPC 消息协议（`ipc/messages.py`）：
   ```python
   class MessageType(str, Enum):
       # Python → Electron（stdout）
@@ -493,18 +493,28 @@ imok/
       CONTROL = "control"              # 控制命令（start/stop/switch_source）
   ```
   > 注：翻译/表达/总结消息不再经过 IPC，前端直接调用远程 LLM API。
-- [ ] 2.5.2 实现 `IPCMessage` 数据类与序列化（JSON Lines 格式，每行一个 JSON）
-- [ ] 2.5.3 实现 `SubprocessWriter`（`ipc/subprocess_io.py`）：
+- [x] 2.5.2 实现 `IPCMessage` 数据类与序列化（JSON Lines 格式，每行一个 JSON）
+- [x] 2.5.3 实现 `SubprocessWriter`（`ipc/subprocess_io.py`）：
   - 向 stdout 写入 JSON Lines（供 Electron 主进程读取）
   - 线程安全（ASR 回调可能在不同线程）
-- [ ] 2.5.4 实现 `SubprocessReader`（`ipc/subprocess_io.py`）：
+- [x] 2.5.4 实现 `SubprocessReader`（`ipc/subprocess_io.py`）：
   - 从 stdin 读取 JSON Lines（接收 Electron 控制命令）
   - 异步 readline + 分发到处理器
-- [ ] 2.5.5 更新 `main.py` 新增 `--mode=subprocess` 模式：
+- [x] 2.5.5 更新 `main.py` 新增 `--mode=subprocess` 模式：
   - 与 `cli` 模式共享 Pipeline 逻辑
   - 转写回调改为写 JSON Lines 到 stdout（替代 print）
   - stdin 监听控制命令（start/stop/switch_source）
-- [ ] 2.5.6 编写测试：验证消息序列化/反序列化、I/O 协议
+- [x] 2.5.6 编写测试：验证消息序列化/反序列化、I/O 协议
+
+**实现摘要：**
+
+| 检查项 | 结果 |
+| --- | --- |
+| `ipc/messages.py` 消息协议 | ✅ MessageType/ProcessState/ControlAction 枚举、IPCMessage 序列化、工厂方法 |
+| `ipc/subprocess_io.py` SubprocessWriter | ✅ 线程安全 Lock、BrokenPipe 处理、自动关闭 |
+| `ipc/subprocess_io.py` SubprocessReader | ✅ 异步 readline、消息类型分发、异常安全 |
+| `main.py --mode=subprocess` | ✅ JSON Lines stdout 输出、stdin 控制命令、日志 stderr |
+| 单元测试 (40 个) | ✅ 全部通过 |
 
 ---
 
@@ -1024,7 +1034,7 @@ Phase 3:
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
 | Phase 1a（核心链路） | 6 | 6 | 100% |
-| Phase 1b（翻译+UI） | 10 | 4 | 40% |
+| Phase 1b（翻译+UI） | 10 | 5 | 50% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **10** | **29%** |
+| **总计** | **34** | **11** | **32%** |

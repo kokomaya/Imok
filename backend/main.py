@@ -1,11 +1,13 @@
-"""应用入口 — 支持 CLI 模式和 Server 模式。
+"""应用入口 — 支持 CLI 模式和子进程模式。
 
 CLI 模式 (--mode=cli)：实时打印 ASR 转写结果到终端，用于核心链路验证。
-Server 模式 (--mode=server)：启动 FastAPI + WebSocket 服务（Phase 1b 实现）。
+Subprocess 模式 (--mode=subprocess)：作为 Electron 子进程运行，
+    通过 stdin/stdout JSON Lines 与主进程通信。
 
 使用方式：
     python -m backend.main --mode=cli --source=wasapi
     python -m backend.main --mode=cli --source=mic
+    python -m backend.main --mode=subprocess --source=wasapi
 """
 
 from __future__ import annotations
@@ -17,12 +19,18 @@ import signal
 import sys
 
 
-def _setup_logging(level: str = "INFO") -> None:
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
+def _setup_logging(level: str = "INFO", *, stderr_only: bool = False) -> None:
+    """配置日志。subprocess 模式下日志输出到 stderr，避免污染 stdout JSON Lines。"""
+    handler = logging.StreamHandler(sys.stderr if stderr_only else None)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
     )
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    root.addHandler(handler)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -31,9 +39,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["cli", "server"],
+        choices=["cli", "subprocess"],
         default="cli",
-        help="运行模式: cli (终端输出) 或 server (FastAPI)",
+        help="运行模式: cli (终端输出) 或 subprocess (Electron 子进程 IPC)",
     )
     parser.add_argument(
         "--source",
@@ -158,14 +166,199 @@ async def _run_cli(source_type: str) -> None:
         )
 
 
+def _create_audio_source(source_type: str):
+    """创建音频源（CLI 和 subprocess 共享逻辑）。"""
+    from backend.config import get_settings
+
+    settings = get_settings()
+
+    if source_type == "wasapi":
+        from backend.audio.wasapi_source import WASAPILoopbackSource
+
+        return WASAPILoopbackSource(
+            target_sample_rate=settings.audio.sample_rate,
+            chunk_frames=settings.audio.chunk_frames,
+        )
+    else:
+        from backend.audio.mic_source import MicrophoneSource
+
+        return MicrophoneSource(
+            target_sample_rate=settings.audio.sample_rate,
+            chunk_frames=settings.audio.chunk_frames,
+            device_index=settings.audio.mic_device,
+        )
+
+
+def _create_vad():
+    """创建 VAD 实例。"""
+    from backend.config import get_settings
+    from backend.asr.vad import VoiceActivityDetector
+
+    settings = get_settings()
+    return VoiceActivityDetector(
+        sample_rate=settings.audio.sample_rate,
+        threshold=settings.asr.vad_threshold,
+        min_silence_ms=settings.asr.vad_min_silence_ms,
+        max_segment_s=settings.asr.vad_max_segment_s,
+    )
+
+
+def _create_asr():
+    """创建 ASR 引擎。"""
+    from backend.config import get_settings
+    from backend.asr.whisper_engine import WhisperEngine
+
+    settings = get_settings()
+    return WhisperEngine(settings.asr)
+
+
+async def _run_subprocess(source_type: str) -> None:
+    """Subprocess 模式 — 作为 Electron 子进程运行。
+
+    通过 stdout 输出 JSON Lines 消息（转写结果、状态），
+    通过 stdin 接收控制命令（start/stop/switch_source）。
+    所有日志输出到 stderr。
+    """
+    from backend.ipc.messages import (
+        ControlAction,
+        IPCMessage,
+        MessageType,
+        ProcessState,
+    )
+    from backend.ipc.subprocess_io import SubprocessReader, SubprocessWriter
+    from backend.pipeline.meeting_pipeline import MeetingPipeline, TranscriptionEvent
+
+    logger = logging.getLogger(__name__)
+    writer = SubprocessWriter()
+
+    # 通知 Electron：子进程已就绪
+    writer.write(IPCMessage.status(ProcessState.READY))
+
+    pipeline = None
+    stop_event = asyncio.Event()
+    current_source_type = source_type
+
+    def _on_transcription(event: TranscriptionEvent) -> None:
+        """Pipeline 转写回调 → 写 JSON Lines 到 stdout。"""
+        r = event.result
+        msg = IPCMessage.transcription(
+            r.text,
+            language=r.language,
+            confidence=r.language_probability,
+            segment_start=event.segment_start_time,
+            segment_end=event.segment_end_time,
+        )
+        writer.write(msg)
+
+    async def _start_pipeline(src_type: str) -> MeetingPipeline:
+        """创建并启动 Pipeline。"""
+        writer.write(IPCMessage.status(ProcessState.LOADING, message="Loading models..."))
+
+        try:
+            audio_src = _create_audio_source(src_type)
+            vad = _create_vad()
+            asr = _create_asr()
+            asr.load()
+
+            pl = MeetingPipeline(audio_src, vad, asr)
+            pl.on_transcription(_on_transcription)
+            await pl.start()
+
+            writer.write(
+                IPCMessage.status(
+                    ProcessState.RUNNING,
+                    source=src_type,
+                    asr_model=asr._settings.model_size if hasattr(asr, "_settings") else "",
+                )
+            )
+            return pl
+        except Exception as exc:
+            logger.exception("Failed to start pipeline")
+            writer.write(IPCMessage.error("pipeline_start_failed", str(exc)))
+            raise
+
+    async def _stop_pipeline() -> None:
+        nonlocal pipeline
+        if pipeline is not None:
+            await pipeline.stop()
+            pipeline = None
+            writer.write(IPCMessage.status(ProcessState.STOPPED))
+
+    def _handle_control(message: IPCMessage) -> None:
+        """处理 stdin 控制命令。"""
+        nonlocal current_source_type
+        action = message.data.get("action", "")
+        loop = asyncio.get_event_loop()
+
+        if action == ControlAction.START:
+            asyncio.run_coroutine_threadsafe(_do_start(), loop)
+        elif action == ControlAction.STOP:
+            asyncio.run_coroutine_threadsafe(_do_stop(), loop)
+        elif action == ControlAction.SWITCH_SOURCE:
+            new_source = message.data.get("source", "")
+            if new_source in ("wasapi", "mic"):
+                current_source_type = new_source
+                asyncio.run_coroutine_threadsafe(_do_restart(new_source), loop)
+            else:
+                writer.write(
+                    IPCMessage.error("invalid_source", f"Unknown source: {new_source}")
+                )
+        else:
+            logger.warning("Unknown control action: %s", action)
+
+    async def _do_start() -> None:
+        nonlocal pipeline
+        if pipeline is not None:
+            return
+        try:
+            pipeline = await _start_pipeline(current_source_type)
+        except Exception:
+            pass  # 错误已在 _start_pipeline 中通过 IPC 报告
+
+    async def _do_stop() -> None:
+        await _stop_pipeline()
+
+    async def _do_restart(new_source: str) -> None:
+        nonlocal pipeline
+        await _stop_pipeline()
+        try:
+            pipeline = await _start_pipeline(new_source)
+        except Exception:
+            pass
+
+    # 设置 stdin 读取器
+    reader = SubprocessReader()
+    reader.on_message(MessageType.CONTROL, _handle_control)
+    await reader.start()
+
+    # Windows 信号处理
+    if sys.platform == "win32":
+        signal.signal(signal.SIGINT, lambda s, f: stop_event.set())
+    else:
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGINT, stop_event.set)
+
+    try:
+        await stop_event.wait()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
+        await _stop_pipeline()
+        await reader.stop()
+        writer.close()
+
+
 def main() -> None:
     args = _parse_args()
-    _setup_logging(args.log_level)
 
-    if args.mode == "cli":
+    if args.mode == "subprocess":
+        _setup_logging(args.log_level, stderr_only=True)
+        asyncio.run(_run_subprocess(args.source))
+    elif args.mode == "cli":
+        _setup_logging(args.log_level)
         asyncio.run(_run_cli(args.source))
-    elif args.mode == "server":
-        print("[Server mode not yet implemented. Use --mode=cli for now.]")
+    else:
+        print(f"Unknown mode: {args.mode}")
         sys.exit(1)
 
 
