@@ -14,6 +14,12 @@ const status = ref('disconnected');
 const transcriptions = ref([]);
 const audioSource = ref('wasapi');
 
+// ── 会议历史 ──
+const historyVisible = ref(false);
+const historyMeetings = ref([]);
+const historyLoading = ref(false);
+const loadedMeetingId = ref(null);
+
 let cleanupFns = [];
 
 onMounted(async () => {
@@ -47,6 +53,20 @@ onMounted(async () => {
   cleanupFns.push(
     window.electronAPI.on('python:error', (data) => {
       console.error('[Python Error]', data);
+    }),
+  );
+
+  // 段落摘要 → summary store
+  cleanupFns.push(
+    window.electronAPI.on('python:segment-summary', (data) => {
+      summaryStore.addSegmentSummary(data);
+    }),
+  );
+
+  // 全局摘要 → summary store
+  cleanupFns.push(
+    window.electronAPI.on('python:global-summary', (data) => {
+      summaryStore.updateGlobalSummary(data);
     }),
   );
 
@@ -86,6 +106,120 @@ async function switchAudioSource() {
   const next = audioSource.value === 'wasapi' ? 'mic' : 'wasapi';
   await window.electronAPI.sendControl('switch_source', { source: next });
 }
+
+// ── 会议历史方法 ──
+
+async function toggleHistory() {
+  historyVisible.value = !historyVisible.value;
+  if (historyVisible.value) {
+    await refreshMeetingList();
+  }
+}
+
+async function refreshMeetingList() {
+  if (!window.electronAPI?.listMeetings) return;
+  historyLoading.value = true;
+  try {
+    const result = await window.electronAPI.listMeetings();
+    if (result.ok) {
+      historyMeetings.value = result.meetings;
+    }
+  } catch (err) {
+    console.error('[App] Failed to list meetings:', err);
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+async function loadMeeting(meetingId) {
+  if (!window.electronAPI?.loadMeeting) return;
+  historyLoading.value = true;
+  try {
+    const result = await window.electronAPI.loadMeeting(meetingId);
+    if (!result.ok) {
+      console.error('[App] Failed to load meeting:', result.error);
+      return;
+    }
+    const { meta, transcriptions: trans, summaries } = result.data;
+
+    // 填充字幕列表
+    transcriptions.value = (trans || []).map((t, i) => ({
+      id: i + 1,
+      text: t.text,
+      language: t.language || '',
+      timestamp: t.timestamp
+        ? new Date(t.timestamp * 1000).toLocaleTimeString()
+        : '',
+    }));
+
+    // 填充摘要 store
+    summaryStore.clearAll();
+    if (summaries?.segments) {
+      for (const seg of summaries.segments) {
+        summaryStore.addSegmentSummary(seg);
+      }
+    }
+    if (summaries?.global_summary) {
+      summaryStore.updateGlobalSummary({
+        ...summaries.global_summary,
+        action_items: summaries.action_items || [],
+      });
+    }
+
+    // 展开摘要面板
+    if (!summaryStore.state.visible) {
+      summaryStore.toggleVisible();
+    }
+
+    loadedMeetingId.value = meetingId;
+    historyVisible.value = false;
+  } catch (err) {
+    console.error('[App] Failed to load meeting:', err);
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+async function deleteMeeting(meetingId) {
+  if (!window.electronAPI?.deleteMeeting) return;
+  try {
+    const result = await window.electronAPI.deleteMeeting(meetingId);
+    if (result.ok) {
+      historyMeetings.value = historyMeetings.value.filter(
+        (m) => m.meeting_id !== meetingId,
+      );
+      if (loadedMeetingId.value === meetingId) {
+        loadedMeetingId.value = null;
+      }
+    }
+  } catch (err) {
+    console.error('[App] Failed to delete meeting:', err);
+  }
+}
+
+function backToLive() {
+  loadedMeetingId.value = null;
+  transcriptions.value = [];
+  summaryStore.clearAll();
+}
+
+function formatMeetingTime(epoch) {
+  if (!epoch) return '';
+  const d = new Date(epoch * 1000);
+  return d.toLocaleString('zh-CN', {
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function formatDuration(start, end) {
+  if (!start) return '';
+  const endTs = end || Date.now() / 1000;
+  const sec = Math.round(endTs - start);
+  if (sec < 60) return `${sec}秒`;
+  const min = Math.round(sec / 60);
+  return `${min}分钟`;
+}
 </script>
 
 <template>
@@ -122,9 +256,61 @@ async function switchAudioSource() {
         >
           摘要
         </button>
+        <button
+          class="btn-history"
+          :class="{ active: historyVisible }"
+          @click="toggleHistory"
+          title="查看历史会议记录"
+        >
+          📂 历史
+        </button>
         <span class="status-badge" :class="status">{{ status }}</span>
       </div>
     </header>
+
+    <!-- 回看提示条 -->
+    <div v-if="loadedMeetingId" class="review-bar">
+      <span>📖 正在回看历史会议: {{ loadedMeetingId }}</span>
+      <button class="btn-back-live" @click="backToLive">返回实时</button>
+    </div>
+
+    <!-- 历史会议面板 -->
+    <div v-if="historyVisible" class="history-panel">
+      <div class="history-header">
+        <span class="history-title">📂 历史会议</span>
+        <button class="history-close" @click="historyVisible = false">✕</button>
+      </div>
+      <div v-if="historyLoading" class="history-loading">加载中…</div>
+      <div v-else-if="historyMeetings.length === 0" class="history-empty">
+        暂无历史会议记录
+      </div>
+      <div v-else class="history-list">
+        <div
+          v-for="m in historyMeetings"
+          :key="m.meeting_id"
+          class="history-item"
+          :class="{ active: loadedMeetingId === m.meeting_id }"
+        >
+          <div class="history-item-main" @click="loadMeeting(m.meeting_id)">
+            <div class="history-item-top">
+              <span class="history-date">{{ formatMeetingTime(m.started_at) }}</span>
+              <span class="history-status" :class="m.status">{{ m.status === 'running' ? '进行中' : '已结束' }}</span>
+            </div>
+            <div class="history-item-meta">
+              <span v-if="m.audio_source" class="meta-tag">{{ m.audio_source === 'wasapi' ? '🔊 系统音频' : '🎤 麦克风' }}</span>
+              <span class="meta-tag">💬 {{ m.transcription_count || 0 }} 条字幕</span>
+              <span v-if="m.has_summary" class="meta-tag summary-tag">📋 有摘要</span>
+              <span class="meta-tag">⏱ {{ formatDuration(m.started_at, m.ended_at) }}</span>
+            </div>
+          </div>
+          <button
+            class="history-delete"
+            @click.stop="deleteMeeting(m.meeting_id)"
+            title="删除此会议记录"
+          >🗑</button>
+        </div>
+      </div>
+    </div>
 
     <main class="content">
       <!-- 会议摘要面板 -->
@@ -317,5 +503,187 @@ async function switchAudioSource() {
 
 .text {
   color: #333;
+}
+
+/* ── 历史会议按钮 ── */
+
+.btn-history {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+
+.btn-history:hover,
+.btn-history.active {
+  background: #ede7f6;
+  border-color: #9575cd;
+  color: #4527a0;
+}
+
+/* ── 回看提示条 ── */
+
+.review-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  background: #fff3e0;
+  border-bottom: 1px solid #ffe0b2;
+  font-size: 13px;
+  color: #e65100;
+}
+
+.btn-back-live {
+  font-size: 12px;
+  padding: 2px 10px;
+  border: 1px solid #e65100;
+  border-radius: 4px;
+  background: #fff;
+  color: #e65100;
+  cursor: pointer;
+}
+
+.btn-back-live:hover {
+  background: #e65100;
+  color: #fff;
+}
+
+/* ── 历史面板 ── */
+
+.history-panel {
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafafa;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid #eee;
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  z-index: 1;
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #999;
+  padding: 2px 6px;
+}
+
+.history-close:hover {
+  color: #333;
+}
+
+.history-loading,
+.history-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+}
+
+.history-list {
+  padding: 4px 0;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background 0.15s;
+}
+
+.history-item:hover {
+  background: #e8eaf6;
+}
+
+.history-item.active {
+  background: #e3f2fd;
+  border-left: 3px solid #1565c0;
+}
+
+.history-item-main {
+  flex: 1;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.history-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.history-date {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.history-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #e0e0e0;
+  color: #666;
+}
+
+.history-status.running {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.history-status.finished {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.history-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meta-tag {
+  font-size: 11px;
+  color: #888;
+}
+
+.summary-tag {
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.history-delete {
+  border: none;
+  background: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 6px;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.history-delete:hover {
+  opacity: 1;
 }
 </style>

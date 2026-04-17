@@ -29,6 +29,9 @@ const INVOKE_CHANNELS = [
   'mute-panel:toggle',
   'llm:get-config',
   'llm:chat',
+  'meeting:list',
+  'meeting:load',
+  'meeting:delete',
 ];
 
 /** 允许从 main 发往 renderer 的 on 通道 */
@@ -140,6 +143,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   llmChat: (params) => {
     return ipcRenderer.invoke('llm:chat', params);
+  },
+
+  /**
+   * 列出所有历史会议。
+   * @returns {Promise<{ ok: boolean, meetings?: Array, error?: string }>}
+   */
+  listMeetings: () => {
+    return ipcRenderer.invoke('meeting:list');
+  },
+
+  /**
+   * 加载指定会议的完整数据。
+   * @param {string} meetingId
+   * @returns {Promise<{ ok: boolean, data?: Object, error?: string }>}
+   */
+  loadMeeting: (meetingId) => {
+    return ipcRenderer.invoke('meeting:load', meetingId);
+  },
+
+  /**
+   * 删除指定会议。
+   * @param {string} meetingId
+   * @returns {Promise<{ ok: boolean, error?: string }>}
+   */
+  deleteMeeting: (meetingId) => {
+    return ipcRenderer.invoke('meeting:delete', meetingId);
   },
 
   /**

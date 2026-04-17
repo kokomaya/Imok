@@ -133,18 +133,16 @@ class SegmentSummarizer:
 def _extract_section(text: str, *keywords: str) -> List[str]:
     """从 LLM 摘要文本中按关键词提取段落下的条目列表。
 
-    LLM 通常输出如：
-        ## 讨论主题
-        - 主题A
-        - 主题B
-        ## Action Items
-        - 张三：完成 XXX
+    支持两种格式：
+    1. 列表项（- / * / • / 数字开头）
+    2. Markdown 表格行（| col1 | col2 | ...）
 
     本函数找到包含任一 keyword 的标题行，收集其下方的列表项。
     """
     lines = text.split("\n")
     items: List[str] = []
     capturing = False
+    in_table_header = False
 
     for line in lines:
         stripped = line.strip()
@@ -158,11 +156,30 @@ def _extract_section(text: str, *keywords: str) -> List[str]:
         if is_heading:
             # 如果标题包含任一关键词，开始捕获
             capturing = any(kw.lower() in lower for kw in keywords)
+            in_table_header = False
             continue
 
         if capturing:
             # 空行跳过
             if not stripped:
+                continue
+            # 表格分隔行（|---|---| 或类似）
+            if stripped.startswith("|") and set(stripped.replace("|", "").strip()) <= {"-", ":", " "}:
+                in_table_header = True
+                continue
+            # 表格表头行（第一个 | 行，跳过）
+            if stripped.startswith("|") and not in_table_header and items == [] or False:
+                # 只有当紧跟分隔行时才是表头，先标记后续为数据行
+                in_table_header = False
+                continue
+            # 表格数据行
+            if stripped.startswith("|") and stripped.endswith("|"):
+                in_table_header = False
+                cells = [c.strip() for c in stripped.split("|")[1:-1]]
+                # 合并非空单元格为一条
+                merged = "；".join(c for c in cells if c and not c.startswith("---") and c != "#")
+                if merged:
+                    items.append(merged)
                 continue
             # 收集列表项（- 或 * 或数字开头）
             if stripped.startswith(("-", "*", "•")) or (

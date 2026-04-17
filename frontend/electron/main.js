@@ -182,6 +182,99 @@ function setupIPC() {
       return { ok: false, error: err.message };
     }
   });
+
+  // ── 会议历史管理 ──────────────────────────────────────────
+
+  const meetingsDir = path.join(BACKEND_ROOT, 'data', 'meetings');
+
+  // 列出所有会议
+  ipcMain.handle('meeting:list', () => {
+    try {
+      if (!fs.existsSync(meetingsDir)) return { ok: true, meetings: [] };
+      const dirs = fs.readdirSync(meetingsDir, { withFileTypes: true });
+      const meetings = [];
+      for (const d of dirs) {
+        if (!d.isDirectory()) continue;
+        const metaPath = path.join(meetingsDir, d.name, 'meta.json');
+        if (!fs.existsSync(metaPath)) continue;
+        try {
+          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+          // 附加统计信息
+          const transPath = path.join(meetingsDir, d.name, 'transcriptions.jsonl');
+          let transcriptionCount = 0;
+          if (fs.existsSync(transPath)) {
+            const content = fs.readFileSync(transPath, 'utf-8');
+            transcriptionCount = content.split('\n').filter((l) => l.trim()).length;
+          }
+          const sumPath = path.join(meetingsDir, d.name, 'summaries.json');
+          let hasSummary = false;
+          if (fs.existsSync(sumPath)) {
+            const sumData = JSON.parse(fs.readFileSync(sumPath, 'utf-8'));
+            hasSummary = (sumData.segments?.length > 0) || !!sumData.global_summary;
+          }
+          meetings.push({ ...meta, transcription_count: transcriptionCount, has_summary: hasSummary });
+        } catch (_) { /* skip corrupt entries */ }
+      }
+      meetings.sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
+      return { ok: true, meetings };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // 加载指定会议的完整数据
+  ipcMain.handle('meeting:load', (_event, meetingId) => {
+    try {
+      if (!meetingId || typeof meetingId !== 'string') {
+        return { ok: false, error: 'Invalid meeting ID' };
+      }
+      // 防止路径遍历
+      const sanitized = path.basename(meetingId);
+      const dir = path.join(meetingsDir, sanitized);
+      if (!fs.existsSync(dir)) return { ok: false, error: 'Meeting not found' };
+
+      const metaPath = path.join(dir, 'meta.json');
+      const meta = fs.existsSync(metaPath)
+        ? JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+        : {};
+
+      const transPath = path.join(dir, 'transcriptions.jsonl');
+      const transcriptions = [];
+      if (fs.existsSync(transPath)) {
+        const lines = fs.readFileSync(transPath, 'utf-8').split('\n');
+        for (const line of lines) {
+          if (line.trim()) {
+            try { transcriptions.push(JSON.parse(line)); } catch (_) {}
+          }
+        }
+      }
+
+      const sumPath = path.join(dir, 'summaries.json');
+      const summaries = fs.existsSync(sumPath)
+        ? JSON.parse(fs.readFileSync(sumPath, 'utf-8'))
+        : { segments: [], global_summary: null, action_items: [] };
+
+      return { ok: true, data: { meta, transcriptions, summaries } };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // 删除指定会议
+  ipcMain.handle('meeting:delete', (_event, meetingId) => {
+    try {
+      if (!meetingId || typeof meetingId !== 'string') {
+        return { ok: false, error: 'Invalid meeting ID' };
+      }
+      const sanitized = path.basename(meetingId);
+      const dir = path.join(meetingsDir, sanitized);
+      if (!fs.existsSync(dir)) return { ok: false, error: 'Meeting not found' };
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 }
 
 // ---------------------------------------------------------------
