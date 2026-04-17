@@ -218,6 +218,13 @@ async def _run_subprocess(source_type: str) -> None:
     通过 stdout 输出 JSON Lines 消息（转写结果、状态），
     通过 stdin 接收控制命令（start/stop/switch_source）。
     所有日志输出到 stderr。
+
+    生命周期：
+    1. 启动 → stdout 输出 {"type": "status", "data": {"state": "ready"}}
+    2. 收到 stdin control:start → 加载模型 → 启动 Pipeline → stdout RUNNING
+    3. Pipeline 运行中 → stdout 输出 transcription 消息
+    4. 收到 stdin control:stop → 停止 Pipeline → stdout STOPPED
+    5. stdin EOF 或 SIGINT → 优雅退出
     """
     from backend.ipc.messages import (
         ControlAction,
@@ -237,6 +244,8 @@ async def _run_subprocess(source_type: str) -> None:
     pipeline = None
     stop_event = asyncio.Event()
     current_source_type = source_type
+    # 持有事件循环引用，供从 reader 线程安全调度协程
+    main_loop = asyncio.get_running_loop()
 
     def _on_transcription(event: TranscriptionEvent) -> None:
         """Pipeline 转写回调 → 写 JSON Lines 到 stdout。"""
@@ -285,20 +294,19 @@ async def _run_subprocess(source_type: str) -> None:
             writer.write(IPCMessage.status(ProcessState.STOPPED))
 
     def _handle_control(message: IPCMessage) -> None:
-        """处理 stdin 控制命令。"""
+        """处理 stdin 控制命令（从 reader 线程调用，通过 main_loop 调度协程）。"""
         nonlocal current_source_type
         action = message.data.get("action", "")
-        loop = asyncio.get_event_loop()
 
         if action == ControlAction.START:
-            asyncio.run_coroutine_threadsafe(_do_start(), loop)
+            asyncio.run_coroutine_threadsafe(_do_start(), main_loop)
         elif action == ControlAction.STOP:
-            asyncio.run_coroutine_threadsafe(_do_stop(), loop)
+            asyncio.run_coroutine_threadsafe(_do_stop(), main_loop)
         elif action == ControlAction.SWITCH_SOURCE:
             new_source = message.data.get("source", "")
             if new_source in ("wasapi", "mic"):
                 current_source_type = new_source
-                asyncio.run_coroutine_threadsafe(_do_restart(new_source), loop)
+                asyncio.run_coroutine_threadsafe(_do_restart(new_source), main_loop)
             else:
                 writer.write(
                     IPCMessage.error("invalid_source", f"Unknown source: {new_source}")
@@ -331,12 +339,21 @@ async def _run_subprocess(source_type: str) -> None:
     reader.on_message(MessageType.CONTROL, _handle_control)
     await reader.start()
 
+    # stdin EOF 时自动触发停止（Electron 关闭管道 = 子进程应退出）
+    async def _watch_reader() -> None:
+        """等待 reader 结束（stdin EOF），然后触发优雅退出。"""
+        while reader._running:
+            await asyncio.sleep(0.1)
+        logger.debug("Stdin reader ended, triggering shutdown.")
+        stop_event.set()
+
+    watcher_task = asyncio.create_task(_watch_reader())
+
     # Windows 信号处理
     if sys.platform == "win32":
         signal.signal(signal.SIGINT, lambda s, f: stop_event.set())
     else:
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGINT, stop_event.set)
+        main_loop.add_signal_handler(signal.SIGINT, stop_event.set)
 
     try:
         await stop_event.wait()
@@ -345,6 +362,11 @@ async def _run_subprocess(source_type: str) -> None:
     finally:
         await _stop_pipeline()
         await reader.stop()
+        watcher_task.cancel()
+        try:
+            await watcher_task
+        except asyncio.CancelledError:
+            pass
         writer.close()
 
 

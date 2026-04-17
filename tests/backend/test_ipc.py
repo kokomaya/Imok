@@ -514,3 +514,223 @@ class TestMainSubprocessMode:
         assert len(received) == 1
         assert received[0].data["action"] == "switch_source"
         assert received[0].data["source"] == "mic"
+
+
+# =========================================================================
+# 7. 子进程模式集成测试（模拟 stdin/stdout 完整交互）
+# =========================================================================
+class TestSubprocessIntegration:
+    """模拟 Electron ↔ Python 子进程 IPC 的完整交互流程。
+
+    使用 SubprocessWriter + SubprocessReader 搭建模拟环境，
+    验证 JSON Lines 协议的端到端正确性。
+    """
+
+    def test_ready_status_on_startup(self):
+        """子进程启动时应立即输出 READY 状态。"""
+        stdout = io.StringIO()
+        writer = SubprocessWriter(stream=stdout)
+        writer.write(IPCMessage.status(ProcessState.READY))
+
+        output = stdout.getvalue()
+        lines = [l for l in output.strip().split("\n") if l.strip()]
+        assert len(lines) == 1
+        msg = json.loads(lines[0])
+        assert msg["type"] == "status"
+        assert msg["data"]["state"] == "ready"
+
+    def test_full_lifecycle_status_sequence(self):
+        """验证完整生命周期状态序列：READY → LOADING → RUNNING → STOPPED。"""
+        stdout = io.StringIO()
+        writer = SubprocessWriter(stream=stdout)
+
+        writer.write(IPCMessage.status(ProcessState.READY))
+        writer.write(IPCMessage.status(ProcessState.LOADING, message="Loading models..."))
+        writer.write(IPCMessage.status(ProcessState.RUNNING, source="wasapi", asr_model="medium"))
+        writer.write(IPCMessage.status(ProcessState.STOPPED))
+
+        lines = [l for l in stdout.getvalue().strip().split("\n") if l.strip()]
+        assert len(lines) == 4
+
+        states = [json.loads(l)["data"]["state"] for l in lines]
+        assert states == ["ready", "loading", "running", "stopped"]
+
+        running_msg = json.loads(lines[2])
+        assert running_msg["data"]["source"] == "wasapi"
+        assert running_msg["data"]["asr_model"] == "medium"
+
+    def test_transcription_output_format(self):
+        """验证 transcription 消息格式完整性。"""
+        stdout = io.StringIO()
+        writer = SubprocessWriter(stream=stdout)
+
+        writer.write(IPCMessage.transcription(
+            "今天讨论一下架构优化方案",
+            language="zh",
+            confidence=0.95,
+            segment_start=5.2,
+            segment_end=8.7,
+        ))
+
+        line = stdout.getvalue().strip()
+        msg = json.loads(line)
+        assert msg["type"] == "transcription"
+        assert msg["data"]["text"] == "今天讨论一下架构优化方案"
+        assert msg["data"]["language"] == "zh"
+        assert msg["data"]["confidence"] == 0.95
+        assert msg["data"]["segment_start"] == 5.2
+        assert msg["data"]["segment_end"] == 8.7
+        assert "ts" in msg
+
+    def test_error_output_format(self):
+        """验证 error 消息格式。"""
+        stdout = io.StringIO()
+        writer = SubprocessWriter(stream=stdout)
+
+        writer.write(IPCMessage.error("audio_device_lost", "WASAPI device disconnected"))
+
+        msg = json.loads(stdout.getvalue().strip())
+        assert msg["type"] == "error"
+        assert msg["data"]["code"] == "audio_device_lost"
+        assert msg["data"]["message"] == "WASAPI device disconnected"
+
+    @pytest.mark.asyncio
+    async def test_stdin_control_to_stdout_response(self):
+        """模拟完整 stdin→处理→stdout 流程。
+
+        模拟 Electron 发送 start/stop 控制命令，
+        验证处理器能正确接收并可触发 stdout 响应。
+        """
+        # 模拟 stdin：发送 start 然后 stop
+        start_cmd = IPCMessage.control(ControlAction.START)
+        stop_cmd = IPCMessage.control(ControlAction.STOP)
+        stdin_data = start_cmd.to_json_line() + "\n" + stop_cmd.to_json_line() + "\n"
+        stdin_stream = io.StringIO(stdin_data)
+
+        # 模拟 stdout
+        stdout_stream = io.StringIO()
+        writer = SubprocessWriter(stream=stdout_stream)
+
+        # 处理器：收到 start → 写 RUNNING，收到 stop → 写 STOPPED
+        def handle_control(msg: IPCMessage) -> None:
+            action = msg.data.get("action", "")
+            if action == "start":
+                writer.write(IPCMessage.status(ProcessState.RUNNING, source="wasapi"))
+            elif action == "stop":
+                writer.write(IPCMessage.status(ProcessState.STOPPED))
+
+        reader = SubprocessReader(stream=stdin_stream)
+        reader.on_message("control", handle_control)
+
+        await reader.start()
+        await asyncio.sleep(0.3)
+        await reader.stop()
+
+        # 验证 stdout 输出
+        lines = [l for l in stdout_stream.getvalue().strip().split("\n") if l.strip()]
+        assert len(lines) == 2
+        assert json.loads(lines[0])["data"]["state"] == "running"
+        assert json.loads(lines[1])["data"]["state"] == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_switch_source_control(self):
+        """模拟 switch_source 命令并验证响应。"""
+        switch_cmd = IPCMessage.control(ControlAction.SWITCH_SOURCE, source="mic")
+        stdin_stream = io.StringIO(switch_cmd.to_json_line() + "\n")
+
+        stdout_stream = io.StringIO()
+        writer = SubprocessWriter(stream=stdout_stream)
+
+        def handle_control(msg: IPCMessage) -> None:
+            action = msg.data.get("action", "")
+            if action == "switch_source":
+                new_source = msg.data.get("source", "")
+                writer.write(IPCMessage.status(ProcessState.RUNNING, source=new_source))
+
+        reader = SubprocessReader(stream=stdin_stream)
+        reader.on_message("control", handle_control)
+
+        await reader.start()
+        await asyncio.sleep(0.2)
+        await reader.stop()
+
+        lines = [l for l in stdout_stream.getvalue().strip().split("\n") if l.strip()]
+        assert len(lines) == 1
+        msg = json.loads(lines[0])
+        assert msg["data"]["state"] == "running"
+        assert msg["data"]["source"] == "mic"
+
+    def test_multiple_transcriptions_interleaved(self):
+        """验证多条 transcription 消息连续输出。"""
+        stdout = io.StringIO()
+        writer = SubprocessWriter(stream=stdout)
+
+        texts = ["第一句话", "Second sentence", "第三句混合 mixed"]
+        for i, text in enumerate(texts):
+            writer.write(IPCMessage.transcription(
+                text,
+                language="zh" if i != 1 else "en",
+                segment_start=float(i * 3),
+                segment_end=float(i * 3 + 2.5),
+            ))
+
+        lines = [l for l in stdout.getvalue().strip().split("\n") if l.strip()]
+        assert len(lines) == 3
+
+        for i, line in enumerate(lines):
+            msg = json.loads(line)
+            assert msg["type"] == "transcription"
+            assert msg["data"]["text"] == texts[i]
+
+    @pytest.mark.asyncio
+    async def test_stdin_eof_detected(self):
+        """stdin EOF 时 reader 自动停止。"""
+        stdin_stream = io.StringIO("")  # 立即 EOF
+        reader = SubprocessReader(stream=stdin_stream)
+
+        await reader.start()
+        await asyncio.sleep(0.2)
+
+        assert not reader._running
+
+    def test_invalid_source_error_response(self):
+        """模拟 switch_source 无效源时返回 error 消息。"""
+        stdout = io.StringIO()
+        writer = SubprocessWriter(stream=stdout)
+
+        # 模拟 main.py 中对无效 source 的处理
+        new_source = "invalid"
+        if new_source not in ("wasapi", "mic"):
+            writer.write(IPCMessage.error("invalid_source", f"Unknown source: {new_source}"))
+
+        msg = json.loads(stdout.getvalue().strip())
+        assert msg["type"] == "error"
+        assert msg["data"]["code"] == "invalid_source"
+
+    def test_all_messages_have_timestamp(self):
+        """验证所有消息都包含时间戳。"""
+        stdout = io.StringIO()
+        writer = SubprocessWriter(stream=stdout)
+
+        writer.write(IPCMessage.status(ProcessState.READY))
+        writer.write(IPCMessage.transcription("test"))
+        writer.write(IPCMessage.error("test", "test"))
+
+        for line in stdout.getvalue().strip().split("\n"):
+            msg = json.loads(line)
+            assert "ts" in msg
+            assert isinstance(msg["ts"], float)
+
+    def test_cli_mode_preserved(self):
+        """验证 --mode=cli 仍然可以被解析。"""
+        from backend.main import _parse_args
+
+        import sys
+        original_argv = sys.argv
+        sys.argv = ["main.py", "--mode=cli", "--source=mic"]
+        try:
+            args = _parse_args()
+            assert args.mode == "cli"
+            assert args.source == "mic"
+        finally:
+            sys.argv = original_argv

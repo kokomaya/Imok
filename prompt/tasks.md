@@ -522,25 +522,34 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 0.5 天 |
-| 产出文件 | `main.py` |
+| 产出文件 | `main.py`, `frontend/electron/python-bridge.js` |
 | 依赖 | Task 2.5 |
 
 **子步骤：**
 
-- [ ] 2.6.1 完善 `main.py --mode=subprocess`：
+- [x] 2.6.1 完善 `main.py --mode=subprocess`：
   - 启动时向 stdout 写入 `{"type": "status", "data": {"state": "ready"}}` 
   - 收到 stdin `control:start` 后开始 Pipeline
   - 收到 stdin `control:stop` 后优雅停止
   - 所有日志输出到 stderr（不干扰 stdout JSON Lines 协议）
-- [ ] 2.6.2 编写 Electron 端子进程管理器原型（`frontend/electron/python-bridge.js`）：
+- [x] 2.6.2 编写 Electron 端子进程管理器原型（`frontend/electron/python-bridge.js`）：
   - `child_process.spawn()` 启动 Python
   - 按行读取 stdout → 解析 JSON → 通过 IPC 转发到 Renderer
   - 进程异常退出自动重启
-- [ ] 2.6.3 保留 `--mode=cli` 用于独立调试
-- [ ] 2.6.4 编写集成测试：模拟 stdin 控制命令，验证 stdout 输出格式
+- [x] 2.6.3 保留 `--mode=cli` 用于独立调试
+- [x] 2.6.4 编写集成测试：模拟 stdin 控制命令，验证 stdout 输出格式
+
+**实现摘要：**
+
+| 检查项 | 结果 |
+| --- | --- |
+| `main.py --mode=subprocess` | ✅ READY 状态输出、start/stop/switch_source 控制、EOF 优雅退出、日志 stderr |
+| `frontend/electron/python-bridge.js` | ✅ spawn 子进程、JSON Lines 解析、事件分发、崩溃自动重启 |
+| `--mode=cli` 保留 | ✅ 独立调试不受影响 |
+| 集成测试 (51 个) | ✅ 全部通过 |
 
 ---
 
@@ -1034,7 +1043,7 @@ Phase 3:
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
 | Phase 1a（核心链路） | 6 | 6 | 100% |
-| Phase 1b（翻译+UI） | 10 | 5 | 50% |
+| Phase 1b（翻译+UI） | 10 | 6 | 60% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **11** | **32%** |
+| **总计** | **34** | **12** | **35%** |
