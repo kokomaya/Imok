@@ -32,6 +32,7 @@ const INVOKE_CHANNELS = [
   'meeting:list',
   'meeting:load',
   'meeting:delete',
+  'meeting:save-summaries',
 ];
 
 /** 允许从 main 发往 renderer 的 on 通道 */
@@ -169,6 +170,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   deleteMeeting: (meetingId) => {
     return ipcRenderer.invoke('meeting:delete', meetingId);
+  },
+
+  /**
+   * 保存会议摘要。
+   * @param {string} meetingId
+   * @param {Object} summaries - { segments, global_summary, action_items }
+   * @returns {Promise<{ ok: boolean, error?: string }>}
+   */
+  saveMeetingSummaries: (meetingId, summaries) => {
+    return ipcRenderer.invoke('meeting:save-summaries', meetingId, summaries);
   },
 
   /**

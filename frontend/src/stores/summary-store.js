@@ -40,6 +40,9 @@ const MAX_SEGMENTS = 100;
 
 let nextSegmentId = 1;
 
+/** 上次保存时的摘要快照哈希，用于脏检测 */
+let _savedHash = '';
+
 const state = reactive({
   /** @type {SegmentSummary[]} */
   segments: [],
@@ -58,6 +61,42 @@ const state = reactive({
 
   /** 回看模式下的原始转写文本列表 @type {{ text: string, timestamp: number }[]} */
   reviewTranscriptions: [],
+
+  /** 当前回看的会议 ID */
+  reviewMeetingId: '',
+});
+
+// ── 脏检测 ──
+
+/**
+ * 生成当前摘要内容的简单哈希字符串。
+ * 仅用于比较是否有变化，不要求加密安全。
+ */
+function _contentHash() {
+  const segPart = state.segments.map((s) => s.rawText).join('|');
+  const globalPart = state.globalSummary?.rawText || '';
+  return `${segPart}::${globalPart}`;
+}
+
+/**
+ * 摘要内容是否在上次保存后发生了变化。
+ */
+const isDirty = computed(() => {
+  return _contentHash() !== _savedHash;
+});
+
+/**
+ * 标记当前状态为已保存。
+ */
+function markSaved() {
+  _savedHash = _contentHash();
+}
+
+/**
+ * 是否已有段落摘要或全局总结。
+ */
+const hasSummaryContent = computed(() => {
+  return state.segments.length > 0 || state.globalSummary !== null;
 });
 
 /**
@@ -111,15 +150,19 @@ function clearAll() {
   state.segments.splice(0, state.segments.length);
   state.globalSummary = null;
   state.reviewMode = false;
+  state.reviewMeetingId = '';
   state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length);
+  _savedHash = '';
 }
 
 /**
  * 设置历史回看数据。
  * @param {{ text: string, timestamp: number }[]} transcriptions
+ * @param {string} [meetingId]
  */
-function setReviewData(transcriptions) {
+function setReviewData(transcriptions, meetingId = '') {
   state.reviewMode = true;
+  state.reviewMeetingId = meetingId;
   state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length, ...transcriptions);
 }
 
@@ -157,15 +200,59 @@ function toggleVisible() {
   state.visible = !state.visible;
 }
 
+/**
+ * 获取可序列化的摘要数据（用于持久化）。
+ * @returns {{ segments: Object[], global_summary: Object|null, action_items: Object[] }}
+ */
+function getSummariesForSave() {
+  const segments = state.segments.map((s) => ({
+    summary_type: 'segment',
+    raw_text: s.rawText,
+    time_range: s.timeRange,
+    topics: s.topics,
+    conclusions: s.conclusions,
+    action_items: s.actionItems,
+    timestamp: s.timestamp / 1000,
+  }));
+
+  let globalSummary = null;
+  const actionItems = [];
+
+  if (state.globalSummary) {
+    globalSummary = {
+      summary_type: 'global',
+      raw_text: state.globalSummary.rawText,
+      segments_merged: state.globalSummary.segmentsMerged,
+      merge_count: state.globalSummary.mergeCount,
+      timestamp: state.globalSummary.lastUpdated / 1000,
+    };
+    for (const ai of state.globalSummary.actionItems) {
+      actionItems.push({
+        description: ai.description,
+        assignee: ai.assignee,
+        deadline: ai.deadline || '',
+        status: ai.status || 'open',
+        source: '',
+      });
+    }
+  }
+
+  return { segments, global_summary: globalSummary, action_items: actionItems };
+}
+
 export const summaryStore = {
   state,
   allTopics,
   latestSegment,
   actionItems,
+  isDirty,
+  hasSummaryContent,
   addSegmentSummary,
   updateGlobalSummary,
   clearAll,
   toggleVisible,
   setReviewData,
   clearReviewData,
+  markSaved,
+  getSummariesForSave,
 };

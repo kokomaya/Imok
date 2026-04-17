@@ -275,6 +275,29 @@ function setupIPC() {
       return { ok: false, error: err.message };
     }
   });
+
+  // 保存会议摘要（覆盖 summaries.json）
+  ipcMain.handle('meeting:save-summaries', (_event, meetingId, summaries) => {
+    try {
+      if (!meetingId || typeof meetingId !== 'string') {
+        return { ok: false, error: 'Invalid meeting ID' };
+      }
+      if (!summaries || typeof summaries !== 'object') {
+        return { ok: false, error: 'Invalid summaries data' };
+      }
+      const sanitized = path.basename(meetingId);
+      const dir = path.join(meetingsDir, sanitized);
+      if (!fs.existsSync(dir)) return { ok: false, error: 'Meeting not found' };
+
+      const sumPath = path.join(dir, 'summaries.json');
+      const tmpPath = sumPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(summaries, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, sumPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 }
 
 // ---------------------------------------------------------------

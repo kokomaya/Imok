@@ -25,6 +25,10 @@ let cleanupFns = [];
 onMounted(async () => {
   // 主窗口视图才直接监听 IPC（overlay 有独立的 ipc-bridge 服务）
   if (currentRoute.value !== 'main') return;
+
+  // 关闭窗口时检查未保存摘要
+  window.addEventListener('beforeunload', onBeforeUnload);
+
   if (!window.electronAPI) {
     status.value = 'no-electron';
     return;
@@ -93,7 +97,15 @@ onMounted(async () => {
 onUnmounted(() => {
   cleanupFns.forEach((fn) => fn());
   cleanupFns = [];
+  window.removeEventListener('beforeunload', onBeforeUnload);
 });
+
+function onBeforeUnload(e) {
+  if (summaryStore.isDirty.value && summaryStore.state.reviewMeetingId) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+}
 
 function openOverlay() {
   if (window.electronAPI) {
@@ -108,6 +120,34 @@ async function switchAudioSource() {
 }
 
 // ── 会议历史方法 ──
+
+/**
+ * 检查当前摘要是否有未保存修改，提示用户保存。
+ * @returns {Promise<boolean>} true = 可以继续操作，false = 用户取消
+ */
+async function checkUnsavedSummary() {
+  if (!summaryStore.isDirty.value || !summaryStore.state.reviewMeetingId) return true;
+
+  const action = window.confirm(
+    '当前摘要有未保存的修改，是否保存？\n\n点击"确定"保存后继续，点击"取消"放弃修改。',
+  );
+  if (action) {
+    // 保存
+    const meetingId = summaryStore.state.reviewMeetingId;
+    if (window.electronAPI?.saveMeetingSummaries) {
+      const data = summaryStore.getSummariesForSave();
+      const result = await window.electronAPI.saveMeetingSummaries(meetingId, data);
+      if (result.ok) {
+        summaryStore.markSaved();
+      } else {
+        window.alert('保存失败：' + (result.error || '未知错误'));
+        return false;
+      }
+    }
+  }
+  // 无论是否保存，都允许继续
+  return true;
+}
 
 async function toggleHistory() {
   historyVisible.value = !historyVisible.value;
@@ -133,6 +173,10 @@ async function refreshMeetingList() {
 
 async function loadMeeting(meetingId) {
   if (!window.electronAPI?.loadMeeting) return;
+
+  // 检查未保存的摘要修改
+  if (!(await checkUnsavedSummary())) return;
+
   historyLoading.value = true;
   try {
     const result = await window.electronAPI.loadMeeting(meetingId);
@@ -158,6 +202,7 @@ async function loadMeeting(meetingId) {
     // 设置回看模式（传递原始转写文本供 SummaryPanel 调用 LLM 生成摘要）
     summaryStore.setReviewData(
       (trans || []).map((t) => ({ text: t.text, timestamp: t.timestamp || 0 })),
+      meetingId,
     );
 
     if (summaries?.segments) {
@@ -171,6 +216,9 @@ async function loadMeeting(meetingId) {
         action_items: summaries.action_items || [],
       });
     }
+
+    // 标记初始加载状态为已保存
+    summaryStore.markSaved();
 
     // 展开摘要面板
     if (!summaryStore.state.visible) {
@@ -203,7 +251,8 @@ async function deleteMeeting(meetingId) {
   }
 }
 
-function backToLive() {
+async function backToLive() {
+  if (!(await checkUnsavedSummary())) return;
   loadedMeetingId.value = null;
   transcriptions.value = [];
   summaryStore.clearAll();  // clearAll already resets reviewMode

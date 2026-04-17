@@ -12,6 +12,7 @@ import { summaryStore } from '@/stores/summary-store.js';
 
 const triggeringSegment = ref(false);
 const triggeringGlobal = ref(false);
+const saving = ref(false);
 const summaryInterval = ref(60);
 
 const INTERVAL_OPTIONS = [
@@ -185,6 +186,34 @@ async function generateReviewGlobalSummary() {
   }
 }
 
+// ── 确认覆盖 ──
+
+function confirmOverwrite(type) {
+  return window.confirm(
+    `已存在${type}，重新生成将覆盖当前内容。是否继续？`,
+  );
+}
+
+// ── 保存摘要 ──
+
+async function saveSummaries() {
+  const meetingId = summaryStore.state.reviewMeetingId;
+  if (!meetingId || !window.electronAPI?.saveMeetingSummaries) return;
+  saving.value = true;
+  try {
+    const data = summaryStore.getSummariesForSave();
+    const result = await window.electronAPI.saveMeetingSummaries(meetingId, data);
+    if (result.ok) {
+      summaryStore.markSaved();
+    } else {
+      console.error('[SummaryPanel] Save failed:', result.error);
+      window.alert('保存失败：' + (result.error || '未知错误'));
+    }
+  } finally {
+    saving.value = false;
+  }
+}
+
 // ── 触发器（自动选择回看/实时模式）──
 
 async function onIntervalChange(event) {
@@ -197,6 +226,9 @@ async function onIntervalChange(event) {
 
 async function triggerSegmentSummary() {
   if (triggeringSegment.value) return;
+  if (summaryStore.hasSummaryContent.value) {
+    if (!confirmOverwrite('段落摘要')) return;
+  }
   if (summaryStore.state.reviewMode) {
     await generateReviewSummary();
     return;
@@ -212,6 +244,9 @@ async function triggerSegmentSummary() {
 
 async function triggerGlobalSummary() {
   if (triggeringGlobal.value) return;
+  if (summaryStore.state.globalSummary) {
+    if (!confirmOverwrite('全局总结')) return;
+  }
   if (summaryStore.state.reviewMode) {
     await generateReviewGlobalSummary();
     return;
@@ -309,7 +344,20 @@ function formatUpdatedTime(segment) {
   <div class="summary-panel" v-show="summaryStore.state.visible">
     <!-- 标题栏 -->
     <div class="panel-header">
-      <span class="panel-title">📋 会议摘要</span>
+      <div class="header-left">
+        <span class="panel-title">📋 会议摘要</span>
+        <span v-if="summaryStore.isDirty.value" class="dirty-dot" title="摘要有未保存的修改">●</span>
+        <button
+          v-if="summaryStore.state.reviewMeetingId && summaryStore.hasSummaryContent.value"
+          class="save-btn"
+          :class="{ dirty: summaryStore.isDirty.value }"
+          :disabled="saving || !summaryStore.isDirty.value"
+          @click="saveSummaries"
+          :title="summaryStore.isDirty.value ? '保存摘要到会议记录' : '摘要已保存'"
+        >
+          {{ saving ? '⏳' : '💾' }} {{ summaryStore.isDirty.value ? '保存' : '已保存' }}
+        </button>
+      </div>
       <div class="header-right">
         <label v-if="!summaryStore.state.reviewMode" class="interval-label" title="自动摘要间隔（60秒 ~ 10分钟）">
           ⏱
@@ -534,10 +582,49 @@ function formatUpdatedTime(segment) {
   flex-wrap: wrap;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .panel-title {
   font-size: 13px;
   font-weight: 600;
   color: #333;
+}
+
+.dirty-dot {
+  color: #f57c00;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.save-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.save-btn.dirty {
+  border-color: #f57c00;
+  color: #e65100;
+  background: #fff3e0;
+}
+
+.save-btn.dirty:hover:not(:disabled) {
+  background: #f57c00;
+  color: #fff;
+}
+
+.save-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ── 触发按钮行 ── */
