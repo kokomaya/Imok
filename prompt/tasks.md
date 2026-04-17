@@ -288,7 +288,7 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 1 天 |
 | 产出文件 | `llm/base.py`, `llm/client.py` |
@@ -296,7 +296,7 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.1.1 定义 `LLMClient` 抽象基类（`llm/base.py`）：
+- [x] 2.1.1 定义 `LLMClient` 抽象基类（`llm/base.py`）：
   ```python
   class LLMClient(ABC):
       @abstractmethod
@@ -304,13 +304,24 @@ imok/
       @abstractmethod
       async def stream(self, prompt: str) -> AsyncIterator[str]: ...
   ```
-- [ ] 2.1.2 实现公司 LLM API 客户端（`llm/client.py`）：
+- [x] 2.1.2 实现公司 LLM API 客户端（`llm/client.py`）：
   - 使用 `httpx.AsyncClient` 进行 Streaming SSE 调用
   - 支持 API Key 认证
   - 实现连接池与超时配置
-- [ ] 2.1.3 实现重试机制（指数退避，最多 3 次）
-- [ ] 2.1.4 实现断网检测与降级标记
-- [ ] 2.1.5 编写测试：验证 Streaming 调用首 token 延迟
+- [x] 2.1.3 实现重试机制（指数退避，最多 3 次）
+- [x] 2.1.4 实现断网检测与降级标记
+- [x] 2.1.5 编写测试：验证 Streaming 调用首 token 延迟
+
+**实现摘要：**
+
+| 检查项 | 结果 |
+| --- | --- |
+| `llm/base.py` ABC | ✅ LLMClient, ChatMessage, LLMResponse, LLMClientState |
+| `llm/client.py` CompanyLLMClient | ✅ httpx SSE streaming, 连接池, API Key 认证 |
+| 重试机制 | ✅ 指数退避 (1s→2s→4s→8s cap) + 随机抖动 |
+| 断网检测 | ✅ READY → DEGRADED (1次失败) → OFFLINE (3次连续失败) → 恢复 |
+| 单元测试 (35 个) | ✅ 全部通过 |
+| 回归测试 (60 个) | ✅ 全部通过 |
 
 ---
 
@@ -318,7 +329,7 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 0.5 天 |
 | 产出文件 | `llm/prompt_manager.py`, `llm/glossary.py`, `config/glossary.json` |
@@ -326,15 +337,24 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.2.1 实现 `GlossaryManager`（`llm/glossary.py`）：
+- [x] 2.2.1 实现 `GlossaryManager`（`llm/glossary.py`）：
   - 从 JSON 文件加载术语表
   - 支持运行时增删术语
   - 格式化为 Prompt 可注入的字符串
-- [ ] 2.2.2 实现 `PromptManager`（`llm/prompt_manager.py`）：
+- [x] 2.2.2 实现 `PromptManager`（`llm/prompt_manager.py`）：
   - 管理翻译 Prompt、闭麦表达 Prompt、总结 Prompt 模板
   - 支持变量注入（`{text}`, `{glossary}`, `{recent_context}`, `{scene_description}`）
-- [ ] 2.2.3 创建默认术语表（`config/glossary.json`）
-- [ ] 2.2.4 编写测试：验证 Prompt 渲染结果正确性
+- [x] 2.2.3 创建默认术语表（`config/glossary.json`）
+- [x] 2.2.4 编写测试：验证 Prompt 渲染结果正确性
+
+**实现摘要：**
+
+| 检查项 | 结果 |
+| --- | --- |
+| `llm/glossary.py` GlossaryManager | ✅ JSON 加载/保存、增删查、format_for_prompt() |
+| `llm/prompt_manager.py` PromptManager | ✅ 4 类模板 (translation/expression/summary/merge_summary) |
+| `config/glossary.json` | ✅ 15 条汽车/嵌入式术语 (已有) |
+| 单元测试 (39 个) | ✅ 全部通过 |
 
 ---
 
@@ -934,7 +954,7 @@ Phase 3:
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
 | Phase 1a（核心链路） | 6 | 6 | 100% |
-| Phase 1b（翻译+UI） | 10 | 0 | 0% |
+| Phase 1b（翻译+UI） | 10 | 2 | 20% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **6** | **18%** |
+| **总计** | **34** | **8** | **24%** |
