@@ -175,6 +175,10 @@ class PathSettings(BaseSettings):
         default=_PROJECT_ROOT / "config" / "scenes.json",
         description="默认场景配置路径",
     )
+    providers_file: Path = Field(
+        default=_PROJECT_ROOT / "config" / "llm_providers.yaml",
+        description="LLM 提供商配置路径",
+    )
 
     def ensure_dirs(self) -> None:
         """确保所有必要目录存在。"""

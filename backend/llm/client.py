@@ -8,6 +8,7 @@
 - SSE Streaming 逐 token 输出
 - 指数退避重试（可配置最大重试次数）
 - 断网检测与状态降级标记
+- 支持自定义请求头和 SSL 证书验证控制
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import AsyncIterator, List, Optional
+from typing import AsyncIterator, Dict, List, Optional
 
 import httpx
 
@@ -54,16 +55,24 @@ class CompanyLLMClient(LLMClient):
     支持 SSE Streaming 和指数退避重试。
     """
 
-    def __init__(self, settings: Optional[LLMSettings] = None) -> None:
+    def __init__(
+        self,
+        settings: Optional[LLMSettings] = None,
+        *,
+        extra_headers: Optional[Dict[str, str]] = None,
+        verify_ssl: bool = True,
+    ) -> None:
         self._settings = settings or LLMSettings()
         self._state = LLMClientState.READY
         self._consecutive_failures = 0
         self._last_success_time = time.monotonic()
 
         # httpx 异步客户端（连接池复用）
-        headers = {"Content-Type": "application/json"}
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
         if self._settings.api_key:
             headers["Authorization"] = f"Bearer {self._settings.api_key}"
+        if extra_headers:
+            headers.update(extra_headers)
 
         self._client = httpx.AsyncClient(
             base_url=self._settings.api_base_url,
@@ -78,6 +87,7 @@ class CompanyLLMClient(LLMClient):
                 max_connections=10,
                 max_keepalive_connections=5,
             ),
+            verify=verify_ssl,
         )
 
         logger.info(
