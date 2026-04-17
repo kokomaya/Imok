@@ -12,6 +12,7 @@ const { currentRoute } = useHashRoute();
 
 const status = ref('disconnected');
 const transcriptions = ref([]);
+const audioSource = ref('wasapi');
 
 let cleanupFns = [];
 
@@ -26,6 +27,9 @@ onMounted(async () => {
   cleanupFns.push(
     window.electronAPI.on('python:status', (data) => {
       status.value = data.state || 'unknown';
+      if (data.source) {
+        audioSource.value = data.source;
+      }
     }),
   );
 
@@ -76,6 +80,12 @@ function openOverlay() {
     window.electronAPI.openOverlay();
   }
 }
+
+async function switchAudioSource() {
+  if (!window.electronAPI) return;
+  const next = audioSource.value === 'wasapi' ? 'mic' : 'wasapi';
+  await window.electronAPI.sendControl('switch_source', { source: next });
+}
 </script>
 
 <template>
@@ -87,6 +97,14 @@ function openOverlay() {
     <header class="header">
       <h1 class="title">Imok Meeting Assistant</h1>
       <div class="header-actions">
+        <button
+          class="btn-audio-source"
+          :class="audioSource"
+          @click="switchAudioSource"
+          :title="audioSource === 'wasapi' ? '当前：系统音频（点击切换到麦克风）' : '当前：麦克风（点击切换到系统音频）'"
+        >
+          {{ audioSource === 'wasapi' ? '🔊 系统音频' : '🎤 麦克风' }}
+        </button>
         <button class="btn-overlay" @click="openOverlay" title="打开悬浮字幕">
           字幕窗
         </button>
@@ -202,6 +220,28 @@ function openOverlay() {
 .btn-summary:hover {
   background: #e8f5e9;
   border-color: #81c784;
+}
+
+.btn-audio-source {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+
+.btn-audio-source.wasapi {
+  background: #e8eaf6;
+  border-color: #7986cb;
+  color: #283593;
+}
+
+.btn-audio-source.mic {
+  background: #fce4ec;
+  border-color: #f48fb1;
+  color: #880e4f;
 }
 
 .title {

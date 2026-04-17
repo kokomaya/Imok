@@ -82,6 +82,9 @@ class WASAPILoopbackSource(AudioSource):
 
     通过 pyaudiowpatch 捕获系统音频输出（如 Teams 会议声音），
     自动重采样为目标采样率 (16kHz)，输出 mono float32。
+
+    使用阻塞读取 + 后台线程模式（而非回调模式），
+    因为部分 Realtek 驱动下 pyaudiowpatch 回调不触发。
     """
 
     def __init__(
@@ -102,9 +105,11 @@ class WASAPILoopbackSource(AudioSource):
         self._active = False
         self._start_time = 0.0
         self._frames_read = 0
+        self._reader_thread: Optional[threading.Thread] = None
 
         self._device_sr = 0
         self._device_channels = 0
+        self._device_chunk = 0
         self._lock = threading.Lock()
 
     def start(self) -> None:
@@ -123,26 +128,33 @@ class WASAPILoopbackSource(AudioSource):
         self._device_channels = max(dev_info["maxInputChannels"], 1)
 
         # 按设备原生采样率计算每次采集帧数，使 chunk 时长与目标 chunk 时长一致
-        device_chunk = int(
+        self._device_chunk = int(
             self._chunk_frames * self._device_sr / self._target_sr
         )
 
+        # 使用阻塞模式打开流（不传 stream_callback）
+        # 使用 paInt16 格式 — 部分 Realtek 驱动下 paFloat32 阻塞读取极慢
         self._stream = self._pa.open(
-            format=pyaudio.paFloat32,
+            format=pyaudio.paInt16,
             channels=self._device_channels,
             rate=self._device_sr,
             input=True,
             input_device_index=dev_info["index"],
-            frames_per_buffer=device_chunk,
-            stream_callback=self._audio_callback,
+            frames_per_buffer=self._device_chunk,
         )
 
         self._start_time = time.monotonic()
         self._frames_read = 0
         self._active = True
 
+        # 启动后台线程进行阻塞读取
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop, daemon=True, name="wasapi-reader"
+        )
+        self._reader_thread.start()
+
         logger.info(
-            "WASAPI loopback started: device=%s sr=%d ch=%d",
+            "WASAPI loopback started: device=%s sr=%d ch=%d (blocking-read mode)",
             dev_info["name"],
             self._device_sr,
             self._device_channels,
@@ -154,14 +166,39 @@ class WASAPILoopbackSource(AudioSource):
                 return
             self._active = False
 
+        # 尝试 stop_stream() 来唤醒阻塞的 read()
         if self._stream is not None:
-            self._stream.stop_stream()
-            self._stream.close()
-            self._stream = None
+            try:
+                self._stream.stop_stream()
+            except Exception:
+                pass
 
-        if self._pa is not None:
-            self._pa.terminate()
-            self._pa = None
+        # 等待读取线程退出
+        if self._reader_thread is not None:
+            self._reader_thread.join(timeout=1.0)
+            if self._reader_thread.is_alive():
+                # read() 仍在阻塞（系统无音频时会发生）
+                # 线程是 daemon，不会阻止进程退出
+                # 不能 close stream（会导致 access violation）
+                logger.warning(
+                    "WASAPI reader thread stuck in read(), abandoning "
+                    "(daemon thread will die with process)"
+                )
+                self._reader_thread = None
+                self._stream = None
+                self._pa = None
+            else:
+                self._reader_thread = None
+                # 线程已退出，安全关闭流
+                if self._stream is not None:
+                    try:
+                        self._stream.close()
+                    except Exception:
+                        pass
+                    self._stream = None
+                if self._pa is not None:
+                    self._pa.terminate()
+                    self._pa = None
 
         # 清空缓冲区
         while not self._queue.empty():
@@ -198,39 +235,43 @@ class WASAPILoopbackSource(AudioSource):
     def is_active(self) -> bool:
         return self._active
 
-    def _audio_callback(
-        self,
-        in_data: bytes | None,
-        frame_count: int,
-        time_info: dict,
-        status: int,
-    ) -> tuple[None, int]:
-        """PyAudio 回调 — 在音频线程中运行，将数据送入 queue。"""
-        if in_data is None:
-            return (None, pyaudio.paContinue)
+    def _reader_loop(self) -> None:
+        """后台线程：阻塞读取 WASAPI loopback 数据并送入 queue。
 
-        audio = np.frombuffer(in_data, dtype=np.float32)
-
-        # 多声道 → reshape → mono
-        if self._device_channels > 1:
-            audio = audio.reshape(-1, self._device_channels)
-        audio = to_mono_float32(audio)
-
-        # 重采样到目标采样率
-        if self._device_sr != self._target_sr:
-            audio = resample_audio(audio, self._device_sr, self._target_sr)
-
-        try:
-            self._queue.put_nowait(audio)
-        except queue.Full:
-            # 缓冲区满时丢弃最旧的数据
+        WASAPI loopback 的 read() 在系统无音频输出时会无限阻塞，
+        有音频时则正常返回。stop() 使用 stop_stream() + 安全放弃模式处理。
+        """
+        while self._active:
             try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                pass
+                in_data = self._stream.read(
+                    self._device_chunk, exception_on_overflow=False
+                )
+            except Exception:
+                if self._active:
+                    logger.exception("WASAPI read error")
+                break
+
+            # int16 → float32 归一化到 [-1, 1]
+            audio = np.frombuffer(in_data, dtype=np.int16).astype(np.float32) / 32768.0
+
+            # 多声道 → reshape → mono
+            if self._device_channels > 1:
+                audio = audio.reshape(-1, self._device_channels)
+            audio = to_mono_float32(audio)
+
+            # 重采样到目标采样率
+            if self._device_sr != self._target_sr:
+                audio = resample_audio(audio, self._device_sr, self._target_sr)
+
             try:
                 self._queue.put_nowait(audio)
             except queue.Full:
-                pass
-
-        return (None, pyaudio.paContinue)
+                # 缓冲区满时丢弃最旧的数据
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    self._queue.put_nowait(audio)
+                except queue.Full:
+                    pass
