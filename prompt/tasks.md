@@ -132,7 +132,7 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 1 天 |
 | 产出文件 | `audio/base.py`, `audio/wasapi_source.py`, `audio/mic_source.py` |
@@ -140,7 +140,7 @@ imok/
 
 **子步骤：**
 
-- [ ] 1.2.1 定义 `AudioSource` 抽象基类（`base.py`）：
+- [x] 1.2.1 定义 `AudioSource` 抽象基类（`base.py`）：
   ```python
   class AudioSource(ABC):
       @abstractmethod
@@ -152,15 +152,15 @@ imok/
       @abstractmethod
       def get_sample_rate(self) -> int: ...
   ```
-- [ ] 1.2.2 实现 `WASAPILoopbackSource`（`wasapi_source.py`）：
+- [x] 1.2.2 实现 `WASAPILoopbackSource`（`wasapi_source.py`）：
   - 使用 `sounddevice` 或 `pyaudiowpatch` 捕获系统音频
   - 输出格式：16kHz, 16bit, mono PCM
   - 实现自动重采样（如系统音频为 48kHz）
-- [ ] 1.2.3 实现 `MicrophoneSource`（`mic_source.py`）：
+- [x] 1.2.3 实现 `MicrophoneSource`（`mic_source.py`）：
   - 使用 `sounddevice` 捕获默认麦克风
   - 支持指定设备 ID
-- [ ] 1.2.4 编写音频采集自检函数（列举可用设备、验证采集能力）
-- [ ] 1.2.5 编写单元测试：验证音频采集 5 秒并保存为 WAV 文件
+- [x] 1.2.4 编写音频采集自检函数（列举可用设备、验证采集能力）
+- [x] 1.2.5 编写单元测试：验证音频采集 5 秒并保存为 WAV 文件
 
 ---
 
@@ -920,8 +920,8 @@ Phase 3:
 
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
-| Phase 1a（核心链路） | 6 | 1 | 17% |
+| Phase 1a（核心链路） | 6 | 2 | 33% |
 | Phase 1b（翻译+UI） | 10 | 0 | 0% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **1** | **3%** |
+| **总计** | **34** | **2** | **6%** |
