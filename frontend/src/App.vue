@@ -3,7 +3,9 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { useHashRoute } from '@/router.js';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { MuteAssistPanel } from '@/components/MuteAssistPanel';
+import { SummaryPanel } from '@/components/SummaryPanel';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
+import { summaryStore } from '@/stores/summary-store.js';
 import { expressionService } from '@/services/expression-service.js';
 
 const { currentRoute } = useHashRoute();
@@ -95,11 +97,21 @@ function openOverlay() {
         >
           闭麦助手
         </button>
+        <button
+          class="btn-summary"
+          @click="summaryStore.toggleVisible()"
+          title="会议摘要面板"
+        >
+          摘要
+        </button>
         <span class="status-badge" :class="status">{{ status }}</span>
       </div>
     </header>
 
     <main class="content">
+      <!-- 会议摘要面板 -->
+      <SummaryPanel />
+
       <!-- 闭麦表达助手 -->
       <MuteAssistPanel />
 
@@ -175,6 +187,21 @@ function openOverlay() {
 .btn-mute-panel:hover {
   background: #fff3e0;
   border-color: #ffb74d;
+}
+
+.btn-summary {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+
+.btn-summary:hover {
+  background: #e8f5e9;
+  border-color: #81c784;
 }
 
 .title {

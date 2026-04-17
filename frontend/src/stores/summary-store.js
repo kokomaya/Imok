@@ -49,6 +49,9 @@ const state = reactive({
 
   /** 总结模块是否正在处理 */
   processing: false,
+
+  /** 面板是否可见 */
+  visible: true,
 });
 
 /**
@@ -122,6 +125,13 @@ const actionItems = computed(() => {
   return state.globalSummary?.actionItems || [];
 });
 
+/**
+ * 切换面板可见性。
+ */
+function toggleVisible() {
+  state.visible = !state.visible;
+}
+
 export const summaryStore = {
   state,
   allTopics,
@@ -130,4 +140,5 @@ export const summaryStore = {
   addSegmentSummary,
   updateGlobalSummary,
   clearAll,
+  toggleVisible,
 };
