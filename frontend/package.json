@@ -1,0 +1,23 @@
+{
+  "name": "imok-meeting-assistant",
+  "version": "0.1.0",
+  "description": "AI Real-time Meeting Translation & Summarization Assistant",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "electron:dev": "electron .",
+    "build": "vite build",
+    "electron:build": "vite build && electron-builder --config electron-builder.config.js",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.13.0",
+    "vite": "^5.4.0"
+  }
+}

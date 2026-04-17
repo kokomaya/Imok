@@ -557,7 +557,7 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 0.5 天 |
 | 产出文件 | `frontend/` 基础结构 |
@@ -565,11 +565,23 @@ imok/
 
 **子步骤：**
 
-- [ ] 2.7.1 初始化 Electron 项目（`npm init`, 安装 electron, electron-builder）
-- [ ] 2.7.2 选择并配置前端框架（Vue 3 + Vite 或 React + Vite）
-- [ ] 2.7.3 编写 `main.js`：Electron 主进程，创建主窗口
-- [ ] 2.7.4 编写 `preload.js`：暴露安全的 IPC 通道
-- [ ] 2.7.5 配置 electron-builder 基础打包配置
+- [x] 2.7.1 初始化 Electron 项目（`npm init`, 安装 electron, electron-builder）
+- [x] 2.7.2 选择并配置前端框架（Vue 3 + Vite）
+- [x] 2.7.3 编写 `main.js`：Electron 主进程，创建主窗口
+- [x] 2.7.4 编写 `preload.js`：暴露安全的 IPC 通道
+- [x] 2.7.5 配置 electron-builder 基础打包配置
+
+**实现摘要：**
+
+| 检查项 | 结果 |
+| --- | --- |
+| npm init + 依赖安装 | ✅ electron ^28, vue ^3.4, vite ^5.4, electron-builder ^24 |
+| Vue 3 + Vite 配置 | ✅ vite.config.js + @vitejs/plugin-vue, 别名 @→src |
+| `electron/main.js` | ✅ BrowserWindow + PythonBridge 集成 + IPC 通道注册 |
+| `electron/preload.js` | ✅ contextBridge 白名单 IPC、contextIsolation + sandbox |
+| electron-builder 配置 | ✅ NSIS 安装包、extraResources 后端打包 |
+| Vite build 验证 | ✅ 12 modules、dist/ 输出正常 |
+| JS 语法检查 | ✅ preload.js + python-bridge.js 通过 |
 
 ---
 
@@ -1043,7 +1055,7 @@ Phase 3:
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
 | Phase 1a（核心链路） | 6 | 6 | 100% |
-| Phase 1b（翻译+UI） | 10 | 6 | 60% |
+| Phase 1b（翻译+UI） | 10 | 7 | 70% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **12** | **35%** |
+| **总计** | **34** | **13** | **38%** |
