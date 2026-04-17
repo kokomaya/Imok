@@ -161,6 +161,10 @@ class WhisperEngine(ASREngine):
     def is_loaded(self) -> bool:
         return self._model is not None
 
+    def load(self) -> None:
+        """显式预加载 Whisper 模型，避免首次 transcribe() 的延迟。"""
+        self._ensure_loaded()
+
     def _ensure_loaded(self) -> None:
         """懒加载模型 — 首次调用时加载，线程安全。"""
         if self._model is not None:

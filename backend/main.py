@@ -106,6 +106,11 @@ async def _run_cli(source_type: str) -> None:
     print(f"[ASR] Model will be loaded on first transcription (lazy loading)...")
     asr = WhisperEngine(settings.asr)
 
+    # 预加载 ASR 模型
+    print(f"[ASR] Pre-loading model (first time may download from HuggingFace)...")
+    asr.load()
+    print(f"[ASR] Model ready.")
+
     # 组装流水线
     pipeline = MeetingPipeline(audio_source, vad, asr)
     pipeline.on_transcription(_print_transcription)

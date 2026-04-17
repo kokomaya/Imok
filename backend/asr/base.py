@@ -104,3 +104,10 @@ class ASREngine(ABC):
     @abstractmethod
     def is_loaded(self) -> bool:
         """模型是否已加载到内存。"""
+
+    def load(self) -> None:
+        """显式加载模型到内存。
+
+        默认实现为空操作（对于无需预加载的引擎）。
+        支持懒加载的引擎应重写此方法以提前加载，避免首次 transcribe() 延迟。
+        """

@@ -318,6 +318,16 @@ async def _run_e2e_capture(
     pipeline._process_segment = instrumented_process
     pipeline.on_transcription(collector.on_transcription)
 
+    # 预热 ASR 模型（避免首次推理的加载延迟计入测量）
+    print("  Pre-warming ASR model (this may take a while on first run)...")
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, asr.load)
+        print("  ASR model loaded.")
+    except Exception as e:
+        report.errors.append(f"Failed to load ASR model: {e}")
+        return report
+
     # 运行
     print(f"  Starting capture for {duration_s}s...")
     print(f"  (Play audio in Teams or speak into mic now)")
