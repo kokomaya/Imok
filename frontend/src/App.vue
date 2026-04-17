@@ -4,6 +4,7 @@ import { useHashRoute } from '@/router.js';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { MuteAssistPanel } from '@/components/MuteAssistPanel';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
+import { expressionService } from '@/services/expression-service.js';
 
 const { currentRoute } = useHashRoute();
 
@@ -12,7 +13,7 @@ const transcriptions = ref([]);
 
 let cleanupFns = [];
 
-onMounted(() => {
+onMounted(async () => {
   // 主窗口视图才直接监听 IPC（overlay 有独立的 ipc-bridge 服务）
   if (currentRoute.value !== 'main') return;
   if (!window.electronAPI) {
@@ -48,6 +49,19 @@ onMounted(() => {
       muteAssistStore.toggleVisible();
     }),
   );
+
+  // 初始化 LLM 配置 → 表达服务
+  try {
+    const result = await window.electronAPI.getLLMConfig();
+    if (result.ok && result.config) {
+      expressionService.init(result.config);
+      console.log('[App] Expression service initialized');
+    } else {
+      console.warn('[App] LLM config not available:', result.error);
+    }
+  } catch (err) {
+    console.error('[App] Failed to load LLM config:', err);
+  }
 });
 
 onUnmounted(() => {

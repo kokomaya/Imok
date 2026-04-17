@@ -8,8 +8,9 @@
  * 生产模式：加载打包后的 dist/index.html
  */
 
-const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, session } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { PythonBridge } = require('./python-bridge');
 const { WindowManager } = require('./window-manager');
 
@@ -21,6 +22,9 @@ const IS_DEV = !app.isPackaged;
 const VITE_DEV_URL = 'http://localhost:5173';
 const PRELOAD_PATH = path.join(__dirname, 'preload.js');
 const DIST_PATH = path.join(__dirname, '..', 'dist', 'index.html');
+const BACKEND_ROOT = IS_DEV
+  ? path.resolve(__dirname, '..', '..')
+  : path.resolve(process.resourcesPath, 'backend');
 
 // ---------------------------------------------------------------
 // 窗口管理
@@ -136,6 +140,192 @@ function setupIPC() {
     mainWindow?.webContents.send('mute-panel:toggle');
     return { ok: true };
   });
+
+  // LLM 配置：读取 llm_providers.yaml + .env → 返回给 renderer
+  ipcMain.handle('llm:get-config', () => {
+    return loadLLMConfig();
+  });
+
+  // LLM 请求代理：renderer → main → VIO API（绕过 CORS）
+  ipcMain.handle('llm:chat', async (_event, { messages, temperature, max_tokens }) => {
+    const { net } = require('electron');
+    const result = loadLLMConfig();
+    if (!result.ok) return { ok: false, error: result.error };
+
+    const cfg = result.config;
+    const url = `${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
+      ...(cfg.headers || {}),
+    };
+
+    const body = JSON.stringify({
+      model: cfg.model,
+      messages,
+      stream: false,
+      temperature: temperature ?? 0.3,
+      max_tokens: max_tokens ?? 512,
+    });
+
+    try {
+      const response = await net.fetch(url, { method: 'POST', headers, body });
+      if (!response.ok) {
+        const text = await response.text();
+        return { ok: false, error: `HTTP ${response.status}: ${text}` };
+      }
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      return { ok: true, content };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+}
+
+// ---------------------------------------------------------------
+// LLM 配置读取
+// ---------------------------------------------------------------
+
+/**
+ * 读取 llm_providers.yaml + .env，返回前端可用的 LLM 配置。
+ * @returns {{ ok: boolean, config?: Object, error?: string }}
+ */
+function loadLLMConfig() {
+  try {
+    // 1. 读取 .env 到环境变量（简单 key=value 解析）
+    const envPath = path.join(BACKEND_ROOT, '.env');
+    const envVars = {};
+    if (fs.existsSync(envPath)) {
+      const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          envVars[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
+        }
+      }
+    }
+
+    // 2. 读取 llm_providers.yaml
+    const yamlPath = path.join(BACKEND_ROOT, 'config', 'llm_providers.yaml');
+    if (!fs.existsSync(yamlPath)) {
+      return { ok: false, error: `Config not found: ${yamlPath}` };
+    }
+
+    // 简易 YAML 解析 — 使用 js-yaml 如果可用
+    let yaml;
+    try {
+      yaml = require('js-yaml');
+    } catch (_) {
+      yaml = null;
+    }
+
+    const yamlContent = fs.readFileSync(yamlPath, 'utf-8');
+    let parsed;
+    if (yaml) {
+      parsed = yaml.load(yamlContent);
+    } else {
+      parsed = parseSimpleYaml(yamlContent);
+    }
+
+    const defaultName = parsed.default_provider;
+    const provider = parsed.providers?.[defaultName];
+    if (!provider) {
+      return { ok: false, error: `Provider '${defaultName}' not found in config` };
+    }
+
+    // 3. 解析 API token
+    const tokenEnvKey = provider.api_token_env || '';
+    const apiKey = tokenEnvKey
+      ? (envVars[tokenEnvKey] || process.env[tokenEnvKey] || '')
+      : (envVars['API_TOKEN'] || '');
+
+    return {
+      ok: true,
+      config: {
+        baseUrl: provider.base_url,
+        model: provider.model,
+        apiKey,
+        headers: provider.headers || {},
+        timeout: (provider.timeout || 60) * 1000,
+        sslVerify: provider.ssl_verify !== false,
+        stream: provider.stream !== false,
+      },
+    };
+  } catch (err) {
+    console.error('[main] Failed to load LLM config:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * 简易 YAML 解析器 — 仅支持 llm_providers.yaml 的扁平结构。
+ * @param {string} content
+ * @returns {Object}
+ */
+function parseSimpleYaml(content) {
+  const result = { providers: {} };
+  let currentProvider = null;
+  let inHeaders = false;
+
+  for (const raw of content.split('\n')) {
+    const line = raw.replace(/\r$/, '').replace(/#.*$/, '').trimEnd();
+    if (!line.trim()) continue;
+
+    const indent = raw.search(/\S|$/);
+
+    if (indent === 0 && line.includes('default_provider:')) {
+      result.default_provider = line.split(':').slice(1).join(':').trim().replace(/['"]/g, '');
+      currentProvider = null;
+      inHeaders = false;
+    } else if (indent === 0 && line.trim() === 'providers:') {
+      continue;
+    } else if (indent === 2 && line.trim().endsWith(':') && !line.trim().includes(' ')) {
+      currentProvider = line.trim().replace(/:$/, '');
+      result.providers[currentProvider] = {};
+      inHeaders = false;
+    } else if (indent === 4 && currentProvider) {
+      const kv = line.trim();
+      if (kv === 'headers:') {
+        inHeaders = true;
+        result.providers[currentProvider].headers = {};
+      } else if (inHeaders) {
+        inHeaders = false;
+        const ci = kv.indexOf(':');
+        if (ci > 0) {
+          const k = kv.slice(0, ci).trim();
+          let v = kv.slice(ci + 1).trim().replace(/['"]/g, '');
+          if (v === 'true') v = true;
+          else if (v === 'false') v = false;
+          else if (/^\d+(\.\d+)?$/.test(v)) v = Number(v);
+          result.providers[currentProvider][k] = v;
+        }
+      } else {
+        const ci = kv.indexOf(':');
+        if (ci > 0) {
+          const k = kv.slice(0, ci).trim();
+          let v = kv.slice(ci + 1).trim().replace(/['"]/g, '');
+          if (v === 'true') v = true;
+          else if (v === 'false') v = false;
+          else if (/^\d+(\.\d+)?$/.test(v)) v = Number(v);
+          result.providers[currentProvider][k] = v;
+        }
+      }
+    } else if (indent === 6 && currentProvider && inHeaders) {
+      const kv = line.trim();
+      const ci = kv.indexOf(':');
+      if (ci > 0) {
+        const k = kv.slice(0, ci).trim();
+        const v = kv.slice(ci + 1).trim().replace(/['"]/g, '');
+        result.providers[currentProvider].headers[k] = v;
+      }
+    }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------
@@ -146,13 +336,9 @@ function setupIPC() {
  * 初始化 PythonBridge 并将事件转发到渲染进程。
  */
 function initPythonBridge() {
-  const backendDir = IS_DEV
-    ? path.resolve(__dirname, '..', '..')
-    : path.resolve(process.resourcesPath, 'backend');
-
   pythonBridge = new PythonBridge({
-    pythonPath: IS_DEV ? path.resolve(backendDir, '.venv', 'Scripts', 'python') : 'python',
-    backendDir,
+    pythonPath: IS_DEV ? path.resolve(BACKEND_ROOT, '.venv', 'Scripts', 'python') : 'python',
+    backendDir: BACKEND_ROOT,
     source: 'wasapi',
     logLevel: IS_DEV ? 'DEBUG' : 'INFO',
   });
@@ -224,12 +410,45 @@ function registerShortcuts() {
 }
 
 // ---------------------------------------------------------------
+// SSL 证书处理
+// ---------------------------------------------------------------
+
+/**
+ * 根据 LLM 配置决定是否允许自签名证书。
+ * 仅在 ssl_verify: false 时对 LLM API 域名放行。
+ */
+function setupSSLOverride() {
+  const result = loadLLMConfig();
+  if (!result.ok || result.config.sslVerify) return;
+
+  let allowedHost = '';
+  try {
+    allowedHost = new URL(result.config.baseUrl).hostname;
+  } catch (_) {
+    return;
+  }
+
+  session.defaultSession.setCertificateVerifyProc((request, callback) => {
+    if (request.hostname === allowedHost) {
+      // 信任此自签名域名
+      callback(0);
+    } else {
+      // 其他域名使用默认验证
+      callback(-3);
+    }
+  });
+
+  console.log(`[main] SSL verification disabled for: ${allowedHost}`);
+}
+
+// ---------------------------------------------------------------
 // 应用生命周期
 // ---------------------------------------------------------------
 
 app.whenReady().then(() => {
   setupIPC();
   createMainWindow();
+  setupSSLOverride();
   initPythonBridge();
   registerShortcuts();
 

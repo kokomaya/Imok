@@ -53,55 +53,31 @@ async function express(inputText) {
   const text = inputText.trim();
   if (!text) return;
 
-  // 取消之前正在进行的请求
+  // 取消之前正在进行的请求标记
   abort();
 
   const id = muteAssistStore.startExpression(text);
 
   const prompt = EXPRESSION_PROMPT.replace('{text}', text);
 
-  const body = {
-    model: config.model,
-    messages: [{ role: 'user', content: prompt }],
-    stream: true,
-    temperature: 0.3,
-    max_tokens: 512,
-  };
-
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
-    ...(config.headers || {}),
-  };
-
-  const url = `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`;
-
-  activeController = new AbortController();
-  const timeoutId = setTimeout(() => activeController?.abort(), config.timeout || 30000);
-
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: activeController.signal,
+    const result = await window.electronAPI.llmChat({
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 512,
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    if (!result.ok) {
+      throw new Error(result.error);
     }
 
-    await readSSEStream(response, id);
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      // 用户主动取消或超时，不标记错误
-      return;
+    if (result.content) {
+      muteAssistStore.appendOutput(id, result.content);
     }
+    muteAssistStore.finishExpression(id);
+  } catch (err) {
     console.error('[expression-service] Request failed:', err.message);
     muteAssistStore.markError(id);
-  } finally {
-    clearTimeout(timeoutId);
-    activeController = null;
   }
 }
 
@@ -157,6 +133,20 @@ async function readSSEStream(response, id) {
   } finally {
     reader.releaseLock();
   }
+}
+
+/**
+ * 读取非流式 JSON 响应并更新 store。
+ * @param {Response} response
+ * @param {number} id
+ */
+async function readJSONResponse(response, id) {
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content || '';
+  if (content) {
+    muteAssistStore.appendOutput(id, content);
+  }
+  muteAssistStore.finishExpression(id);
 }
 
 /**

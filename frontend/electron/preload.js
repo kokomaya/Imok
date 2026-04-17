@@ -27,6 +27,8 @@ const INVOKE_CHANNELS = [
   'overlay:set-click-through',
   'overlay:set-always-on-top',
   'mute-panel:toggle',
+  'llm:get-config',
+  'llm:chat',
 ];
 
 /** 允许从 main 发往 renderer 的 on 通道 */
@@ -119,6 +121,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   toggleMutePanel: () => {
     return ipcRenderer.invoke('mute-panel:toggle');
+  },
+
+  /**
+   * 获取 LLM 配置（从 llm_providers.yaml + .env 读取）。
+   * @returns {Promise<{ ok: boolean, config?: Object, error?: string }>}
+   */
+  getLLMConfig: () => {
+    return ipcRenderer.invoke('llm:get-config');
+  },
+
+  /**
+   * 通过主进程代理 LLM 请求（绕过 CORS）。
+   * @param {{ messages: Array, temperature?: number, max_tokens?: number }} params
+   * @returns {Promise<{ ok: boolean, content?: string, error?: string }>}
+   */
+  llmChat: (params) => {
+    return ipcRenderer.invoke('llm:chat', params);
   },
 
   /**
