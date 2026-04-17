@@ -4,6 +4,7 @@
  *
  * 单一职责：展示会议摘要的 UI（主题、结论、Action Items、时间线）。
  * 数据来源：summaryStore（由 ipc-bridge 从 Python 子进程接收推送）。
+ * 回看模式：直接通过 llm:chat 代理调用 LLM 生成摘要。
  */
 
 import { ref, computed, watch, nextTick } from 'vue';
@@ -21,6 +22,171 @@ const INTERVAL_OPTIONS = [
   { label: '10分钟', value: 600 },
 ];
 
+// ── LLM Prompts（与 backend/llm/prompt_manager.py 保持一致）──
+
+const SUMMARY_SYSTEM_PROMPT = `你是一个专业的会议记录助手。你的任务是对会议转写文本进行结构化摘要。
+
+要求：
+1. 提取讨论主题和关键结论
+2. 识别 Action Items（含责任人和截止时间，如有提及）
+3. 标注重要的技术决策和风险项
+4. 使用简洁的条目式输出
+
+严格按照以下格式输出（使用 - 列表，不要使用表格）：
+
+## 主题
+- 主题1
+- 主题2
+
+## 结论
+- 结论1
+- 结论2
+
+## Action Items
+- 责任人：任务描述（截止时间）
+- 责任人：任务描述
+
+## 风险
+- 风险1`;
+
+const MERGE_SYSTEM_PROMPT = `你是一个专业的会议记录助手。你的任务是将多个段落摘要合并为一份结构化的全局会议总结。
+
+要求：
+1. 合并相同主题，去除重复内容
+2. 按讨论顺序组织内容
+3. 保留所有 Action Items，不要遗漏
+
+严格按照以下格式输出（使用 - 列表，不要使用表格）：
+
+## 主题
+- 主题1
+- 主题2
+
+## 结论
+- 结论1
+- 结论2
+
+## Action Items
+- 责任人：任务描述（截止时间）
+
+## 风险
+- 风险1`;
+
+// ── 解析 LLM 输出 ──
+
+function parseSummaryResponse(text) {
+  const sections = { topics: [], conclusions: [], action_items: [], risks: [] };
+  const lines = text.split('\n');
+  let current = null;
+
+  for (const line of lines) {
+    const stripped = line.trim();
+    const lower = stripped.toLowerCase();
+
+    if (stripped.startsWith('#')) {
+      if (lower.includes('主题')) current = 'topics';
+      else if (lower.includes('结论')) current = 'conclusions';
+      else if (lower.includes('action') || lower.includes('待办')) current = 'action_items';
+      else if (lower.includes('风险')) current = 'risks';
+      else current = null;
+      continue;
+    }
+
+    if (current && stripped.startsWith('-')) {
+      const item = stripped.slice(1).trim();
+      if (item) sections[current].push(item);
+    }
+  }
+  return sections;
+}
+
+// ── 回看模式：通过 llm:chat 生成摘要 ──
+
+async function generateReviewSummary() {
+  const trans = summaryStore.state.reviewTranscriptions;
+  if (!trans.length || !window.electronAPI?.llmChat) return;
+
+  const textBlock = trans.map((t) => t.text).join('\n');
+  if (!textBlock.trim()) return;
+
+  triggeringSegment.value = true;
+  try {
+    const result = await window.electronAPI.llmChat({
+      messages: [
+        { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
+        { role: 'user', content: `请对以下会议内容进行摘要：\n\n${textBlock}` },
+      ],
+      temperature: 0.3,
+      max_tokens: 1024,
+    });
+
+    if (result.ok && result.content) {
+      const parsed = parseSummaryResponse(result.content);
+      summaryStore.addSegmentSummary({
+        time_range: '完整会议',
+        topics: parsed.topics,
+        conclusions: parsed.conclusions,
+        action_items: parsed.action_items,
+        raw_text: result.content,
+      });
+    } else {
+      console.error('[SummaryPanel] LLM error:', result.error);
+    }
+  } finally {
+    triggeringSegment.value = false;
+  }
+}
+
+async function generateReviewGlobalSummary() {
+  const trans = summaryStore.state.reviewTranscriptions;
+  const segments = summaryStore.state.segments;
+  if (!window.electronAPI?.llmChat) return;
+
+  // 如果没有段落摘要，先生成一个
+  if (segments.length === 0 && trans.length > 0) {
+    await generateReviewSummary();
+  }
+
+  if (summaryStore.state.segments.length === 0) return;
+
+  triggeringGlobal.value = true;
+  try {
+    const segTexts = summaryStore.state.segments.map((s) => s.rawText).join('\n\n---\n\n');
+    const result = await window.electronAPI.llmChat({
+      messages: [
+        { role: 'system', content: MERGE_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: `请将以下段落摘要合并为一份全局会议总结：\n\n${segTexts}`,
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 1500,
+    });
+
+    if (result.ok && result.content) {
+      const parsed = parseSummaryResponse(result.content);
+      summaryStore.updateGlobalSummary({
+        raw_text: result.content,
+        segments_merged: summaryStore.state.segments.length,
+        merge_count: 1,
+        action_items: parsed.action_items.map((item) => {
+          const colonIdx = item.indexOf('：') !== -1 ? item.indexOf('：') : item.indexOf(':');
+          const assignee = colonIdx > 0 ? item.slice(0, colonIdx).trim() : '';
+          const desc = colonIdx > 0 ? item.slice(colonIdx + 1).trim() : item;
+          return { description: desc, assignee, deadline: '', status: 'open' };
+        }),
+      });
+    } else {
+      console.error('[SummaryPanel] LLM merge error:', result.error);
+    }
+  } finally {
+    triggeringGlobal.value = false;
+  }
+}
+
+// ── 触发器（自动选择回看/实时模式）──
+
 async function onIntervalChange(event) {
   const val = Number(event.target.value);
   summaryInterval.value = val;
@@ -30,7 +196,12 @@ async function onIntervalChange(event) {
 }
 
 async function triggerSegmentSummary() {
-  if (!window.electronAPI || triggeringSegment.value) return;
+  if (triggeringSegment.value) return;
+  if (summaryStore.state.reviewMode) {
+    await generateReviewSummary();
+    return;
+  }
+  if (!window.electronAPI) return;
   triggeringSegment.value = true;
   try {
     await window.electronAPI.sendControl('trigger_segment_summary');
@@ -40,7 +211,12 @@ async function triggerSegmentSummary() {
 }
 
 async function triggerGlobalSummary() {
-  if (!window.electronAPI || triggeringGlobal.value) return;
+  if (triggeringGlobal.value) return;
+  if (summaryStore.state.reviewMode) {
+    await generateReviewGlobalSummary();
+    return;
+  }
+  if (!window.electronAPI) return;
   triggeringGlobal.value = true;
   try {
     await window.electronAPI.sendControl('trigger_global_summary');
@@ -49,7 +225,7 @@ async function triggerGlobalSummary() {
   }
 }
 
-const activeTab = ref('overview');
+const activeTab = ref('segment');
 const timelineRef = ref(null);
 
 // 自动滚动时间线到底部
@@ -135,43 +311,32 @@ function formatUpdatedTime(segment) {
     <div class="panel-header">
       <span class="panel-title">📋 会议摘要</span>
       <div class="header-right">
-        <div class="trigger-bar">
-          <label class="interval-label" title="自动摘要间隔（60秒 ~ 10分钟）">
-            ⏱
-            <select class="interval-select" :value="summaryInterval" @change="onIntervalChange">
-              <option
-                v-for="opt in INTERVAL_OPTIONS"
-                :key="opt.value"
-                :value="opt.value"
-              >
-                {{ opt.label }}
-              </option>
-            </select>
-          </label>
-          <button
-            class="trigger-btn"
-            @click="triggerSegmentSummary"
-            :disabled="triggeringSegment"
-            title="立即生成当前段落摘要"
-          >
-            {{ triggeringSegment ? '⏳' : '📝' }} 段落摘要
-          </button>
-          <button
-            class="trigger-btn primary"
-            @click="triggerGlobalSummary"
-            :disabled="triggeringGlobal"
-            title="生成全局会议总结（含所有段落）"
-          >
-            {{ triggeringGlobal ? '⏳' : '📊' }} 全局总结
-          </button>
-        </div>
+        <label v-if="!summaryStore.state.reviewMode" class="interval-label" title="自动摘要间隔（60秒 ~ 10分钟）">
+          ⏱
+          <select class="interval-select" :value="summaryInterval" @change="onIntervalChange">
+            <option
+              v-for="opt in INTERVAL_OPTIONS"
+              :key="opt.value"
+              :value="opt.value"
+            >
+              {{ opt.label }}
+            </option>
+          </select>
+        </label>
         <div class="tab-bar">
           <button
             class="tab-btn"
-            :class="{ active: activeTab === 'overview' }"
-            @click="activeTab = 'overview'"
+            :class="{ active: activeTab === 'segment' }"
+            @click="activeTab = 'segment'"
           >
-            概览
+            📝 段落摘要
+          </button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'global' }"
+            @click="activeTab = 'global'"
+          >
+            📊 全局总结
           </button>
           <button
             class="tab-btn"
@@ -192,8 +357,18 @@ function formatUpdatedTime(segment) {
       </div>
     </div>
 
-    <!-- 概览视图 -->
-    <div v-if="activeTab === 'overview'" class="tab-content">
+    <!-- 段落摘要视图 -->
+    <div v-if="activeTab === 'segment'" class="tab-content">
+      <!-- 触发按钮 -->
+      <div class="trigger-row">
+        <button
+          class="trigger-btn"
+          @click="triggerSegmentSummary"
+          :disabled="triggeringSegment"
+        >
+          {{ triggeringSegment ? '⏳ 生成中…' : '▶ 生成段落摘要' }}
+        </button>
+      </div>
       <!-- 当前主题 -->
       <div v-if="currentTopics.length" class="section">
         <div class="section-label">当前讨论主题</div>
@@ -207,18 +382,6 @@ function formatUpdatedTime(segment) {
           </span>
         </div>
       </div>
-
-      <!-- 全局摘要 -->
-      <div v-if="globalRawText" class="section">
-        <div class="section-label">
-          全局总结
-          <span v-if="globalStats" class="section-meta">
-            · {{ globalStats.segmentsMerged }} 段 · {{ globalStats.lastUpdated }}
-          </span>
-        </div>
-        <div class="global-summary-text">{{ globalRawText }}</div>
-      </div>
-
       <!-- 关键结论 -->
       <div v-if="allConclusions.length" class="section">
         <div class="section-label">关键结论</div>
@@ -229,11 +392,39 @@ function formatUpdatedTime(segment) {
           </li>
         </ul>
       </div>
-
       <!-- 空状态 -->
-      <div v-if="!hasContent && !globalRawText" class="empty-state">
+      <div v-if="!hasContent" class="empty-state">
         <div class="empty-icon">📝</div>
-        <div class="empty-text">会议开始后自动生成摘要，或点击上方按钮手动触发</div>
+        <div class="empty-text">点击上方按钮生成段落摘要</div>
+      </div>
+    </div>
+
+    <!-- 全局总结视图 -->
+    <div v-if="activeTab === 'global'" class="tab-content">
+      <!-- 触发按钮 -->
+      <div class="trigger-row">
+        <button
+          class="trigger-btn primary"
+          @click="triggerGlobalSummary"
+          :disabled="triggeringGlobal"
+        >
+          {{ triggeringGlobal ? '⏳ 生成中…' : '▶ 生成全局总结' }}
+        </button>
+      </div>
+      <!-- 全局摘要 -->
+      <div v-if="globalRawText" class="section">
+        <div class="section-label">
+          全局总结
+          <span v-if="globalStats" class="section-meta">
+            · {{ globalStats.segmentsMerged }} 段 · {{ globalStats.lastUpdated }}
+          </span>
+        </div>
+        <div class="global-summary-text">{{ globalRawText }}</div>
+      </div>
+      <!-- 空状态 -->
+      <div v-if="!globalRawText" class="empty-state">
+        <div class="empty-icon">📊</div>
+        <div class="empty-text">点击上方按钮生成全局会议总结</div>
       </div>
     </div>
 
@@ -340,6 +531,7 @@ function formatUpdatedTime(segment) {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .panel-title {
@@ -348,14 +540,14 @@ function formatUpdatedTime(segment) {
   color: #333;
 }
 
-.trigger-bar {
-  display: flex;
-  gap: 4px;
+/* ── 触发按钮行 ── */
+.trigger-row {
+  margin-bottom: 10px;
 }
 
 .trigger-btn {
-  font-size: 11px;
-  padding: 3px 8px;
+  font-size: 12px;
+  padding: 5px 14px;
   border: 1px solid #ccc;
   border-radius: 4px;
   background: #fff;

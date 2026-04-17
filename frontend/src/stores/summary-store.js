@@ -52,6 +52,12 @@ const state = reactive({
 
   /** 面板是否可见 */
   visible: true,
+
+  /** 是否处于历史回看模式 */
+  reviewMode: false,
+
+  /** 回看模式下的原始转写文本列表 @type {{ text: string, timestamp: number }[]} */
+  reviewTranscriptions: [],
 });
 
 /**
@@ -104,6 +110,25 @@ function updateGlobalSummary(data) {
 function clearAll() {
   state.segments.splice(0, state.segments.length);
   state.globalSummary = null;
+  state.reviewMode = false;
+  state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length);
+}
+
+/**
+ * 设置历史回看数据。
+ * @param {{ text: string, timestamp: number }[]} transcriptions
+ */
+function setReviewData(transcriptions) {
+  state.reviewMode = true;
+  state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length, ...transcriptions);
+}
+
+/**
+ * 退出回看模式。
+ */
+function clearReviewData() {
+  state.reviewMode = false;
+  state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length);
 }
 
 /** 所有主题（从所有段落摘要合并去重） */
@@ -141,4 +166,6 @@ export const summaryStore = {
   updateGlobalSummary,
   clearAll,
   toggleVisible,
+  setReviewData,
+  clearReviewData,
 };

@@ -154,6 +154,12 @@ async function loadMeeting(meetingId) {
 
     // 填充摘要 store
     summaryStore.clearAll();
+
+    // 设置回看模式（传递原始转写文本供 SummaryPanel 调用 LLM 生成摘要）
+    summaryStore.setReviewData(
+      (trans || []).map((t) => ({ text: t.text, timestamp: t.timestamp || 0 })),
+    );
+
     if (summaries?.segments) {
       for (const seg of summaries.segments) {
         summaryStore.addSegmentSummary(seg);
@@ -200,7 +206,7 @@ async function deleteMeeting(meetingId) {
 function backToLive() {
   loadedMeetingId.value = null;
   transcriptions.value = [];
-  summaryStore.clearAll();
+  summaryStore.clearAll();  // clearAll already resets reviewMode
 }
 
 function formatMeetingTime(epoch) {
