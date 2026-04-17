@@ -168,7 +168,7 @@ imok/
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | ⬜ 未开始 |
+| 状态 | ✅ 已完成 |
 | 优先级 | P0 |
 | 预估 | 0.5 天 |
 | 产出文件 | `asr/vad.py` |
@@ -176,16 +176,16 @@ imok/
 
 **子步骤：**
 
-- [ ] 1.3.1 封装 Silero-VAD：
+- [x] 1.3.1 封装 Silero-VAD：
   ```python
   class VoiceActivityDetector:
       def __init__(self, threshold=0.5, min_silence_ms=300, max_segment_s=15): ...
       def feed(self, audio_chunk: np.ndarray) -> List[AudioSegment]: ...
       def reset(self) -> None: ...
   ```
-- [ ] 1.3.2 实现 `AudioSegment` 数据类（包含 audio_data, start_time, end_time）
-- [ ] 1.3.3 实现语音段边界检测逻辑（起止点检测 + 最大段时长截断）
-- [ ] 1.3.4 编写测试：用带静音的音频验证分句准确性
+- [x] 1.3.2 实现 `AudioSegment` 数据类（包含 audio_data, start_time, end_time）
+- [x] 1.3.3 实现语音段边界检测逻辑（起止点检测 + 最大段时长截断）
+- [x] 1.3.4 编写测试：用带静音的音频验证分句准确性
 
 ---
 
@@ -920,8 +920,8 @@ Phase 3:
 
 | Phase | 任务数 | 已完成 | 进度 |
 | --- | --- | --- | --- |
-| Phase 1a（核心链路） | 6 | 2 | 33% |
+| Phase 1a（核心链路） | 6 | 3 | 50% |
 | Phase 1b（翻译+UI） | 10 | 0 | 0% |
 | Phase 2（总结+体验） | 12 | 0 | 0% |
 | Phase 3（产品化） | 6 | 0 | 0% |
-| **总计** | **34** | **2** | **6%** |
+| **总计** | **34** | **3** | **9%** |
