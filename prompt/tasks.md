@@ -46,8 +46,8 @@ imok/
 │   │   └── action_item_extractor.py  # Action Items 提取
 │   ├── storage/                      # 持久化模块
 │   │   ├── __init__.py
-│   │   ├── database.py               # SQLite 数据库管理
-│   │   ├── models.py                 # 数据模型定义
+│   │   ├── meeting_store.py          # 会议文件存储管理（SRP: 只负责读写）
+│   │   ├── models.py                 # 数据模型定义（dataclass）
 │   │   └── exporter.py               # 会议纪要导出（Markdown/JSON/Wiki）
 │   ├── pipeline/                     # 流水线编排模块
 │   │   ├── __init__.py
@@ -831,32 +831,70 @@ imok/
 
 ---
 
-### Task 3.6 本地存储层（SQLite）
+### Task 3.6 本地存储层（JSON/JSONL 文件）
 
 | 属性 | 值 |
 | --- | --- |
 | 状态 | ⬜ 未开始 |
 | 优先级 | P1 |
 | 预估 | 1 天 |
-| 产出文件 | `storage/database.py`, `storage/models.py` |
+| 产出文件 | `storage/meeting_store.py`, `storage/models.py` |
 | 依赖 | Task 1.1 |
+
+> **设计决策**：采用 JSON/JSONL 文件存储而非 SQLite。
+> 理由：单用户桌面应用，数据量小（每场会议 < 1MB），查询模式简单（按会议 ID 全量读取），
+> 无并发写入、无跨会议聚合需求。文件存储零新依赖、可直接阅读、
+> JSONL 格式与 IPC 协议一致（零序列化成本）、天然即导出格式。
+> 若将来需要跨会议全文搜索，可从 JSON 迁移到 SQLite（单向简单）。
+
+**存储目录结构：**
+
+```text
+data/
+└── meetings/
+    └── {meeting_id}/              # 每场会议一个文件夹（如 2026-04-17_1430_standup）
+        ├── meta.json              # Meeting 元信息（标题、时间、状态）
+        ├── transcriptions.jsonl   # 转写记录（JSON Lines 追加写入，与 IPC 格式一致）
+        ├── summaries.json         # 段落摘要 + 全局摘要 + Action Items
+        └── export.md              # 会议纪要导出（Task 3.7 生成）
+```
+
+**SOLID 原则映射：**
+
+| 原则 | 体现 |
+| --- | --- |
+| **S** - 单一职责 | `MeetingStore` 只负责文件读写；`models.py` 只定义数据结构；Pipeline 集成由回调完成 |
+| **O** - 开放封闭 | 存储格式通过 dataclass 的 `to_dict()`/`from_dict()` 扩展，新增字段无需改写入逻辑 |
+| **I** - 接口隔离 | `MeetingStore` 按职能拆分方法：`append_transcription()`、`save_summaries()`、`load_meeting()` |
+| **D** - 依赖倒置 | Pipeline 通过回调注入存储，不直接依赖 `MeetingStore` 具体实现 |
 
 **子步骤：**
 
 - [ ] 3.6.1 定义数据模型（`storage/models.py`）：
-  - `Meeting`：会议 ID、标题、开始/结束时间、状态
-  - `Transcription`：转写文本、时间戳、语言、说话者
-  - `Translation`：原文、译文、时间戳
-  - `Summary`：摘要内容、类型（段落/全局）、时间戳
-  - `ActionItem`：描述、责任人、截止时间、状态
-  - `GlossaryEntry`：术语、翻译
-  - `SceneConfig`：场景名称、描述
-- [ ] 3.6.2 实现 `Database` 类（`storage/database.py`）：
-  - SQLite 连接管理（使用 `aiosqlite` 异步操作）
-  - 表创建与迁移
-  - CRUD 操作封装
-- [ ] 3.6.3 在 Pipeline 中集成存储（转写、翻译、摘要自动持久化）
-- [ ] 3.6.4 编写测试
+  - `MeetingMeta`：会议 ID、标题、开始/结束时间、状态、音频源
+  - `TranscriptionEntry`：转写文本、时间戳、语言、置信度、说话者
+  - `SummaryRecord`：摘要内容、类型（segment/global）、时间范围、主题列表
+  - `ActionItemRecord`：描述、责任人、截止时间、状态、来源段落
+  - 所有模型为 `@dataclass`，提供 `to_dict()` / `from_dict()` 序列化方法
+  - 注：`GlossaryEntry` 和 `SceneConfig` 已由 `llm/glossary.py` 和 `expression/scene_manager.py` 管理，不重复定义（ISP）
+- [ ] 3.6.2 实现 `MeetingStore` 类（`storage/meeting_store.py`）：
+  - 会议文件夹生命周期：`create_meeting()` → 创建目录 + `meta.json`
+  - 转写追加写入：`append_transcription(entry)` → 追加一行到 `transcriptions.jsonl`
+  - 摘要保存：`save_summaries(segments, global_summary, action_items)` → 覆写 `summaries.json`
+  - 会议结束：`finish_meeting()` → 更新 `meta.json` 结束时间和状态
+  - 查询：`load_meeting(id)` / `list_meetings()` → 读取文件返回 dataclass
+  - 线程安全：转写追加使用 `threading.Lock`（ASR 回调可能在后台线程）
+- [ ] 3.6.3 在 Pipeline 中集成存储：
+  - `MeetingPipeline.on_transcription` 回调 → `MeetingStore.append_transcription()`
+  - `SummaryCoordinator.on_segment_summary` 回调 → `MeetingStore.save_summaries()`
+  - `SummaryCoordinator.on_global_summary` 回调 → `MeetingStore.save_summaries()`
+  - 通过 `main.py` 注册回调，`MeetingStore` 不直接耦合 Pipeline（DIP）
+- [ ] 3.6.4 编写测试：
+  - 模型序列化/反序列化往返测试
+  - `MeetingStore` CRUD 操作（创建、追加、读取、列表、结束）
+  - JSONL 追加写入原子性与线程安全
+  - Pipeline 集成回调验证
+  - 空会议 / 大量转写边界情况
 
 ---
 
@@ -873,10 +911,11 @@ imok/
 **子步骤：**
 
 - [ ] 3.7.1 实现 `MeetingExporter`（`storage/exporter.py`）：
-  - Markdown 格式导出（含时间戳、双语转写、摘要、Action Items）
-  - JSON 格式导出（结构化数据）
+  - 读取 `MeetingStore` 数据，渲染为目标格式（SRP：只负责格式转换）
+  - Markdown 格式导出（含时间戳、双语转写、摘要、Action Items）→ 写入会议文件夹 `export.md`
+  - JSON 格式导出（结构化数据）→ 会议文件夹本身已是 JSON，聚合为单文件
   - Confluence Wiki 格式导出
-- [ ] 3.7.2 提供 REST 端点 `GET /api/meeting/{id}/export?format=md|json|wiki`
+- [ ] 3.7.2 通过 IPC 命令触发导出（stdin `control:export` → Python 生成文件 → stdout 返回文件路径）
 - [ ] 3.7.3 编写测试
 
 ---
@@ -889,12 +928,12 @@ imok/
 | 优先级 | P1 |
 | 预估 | 0.5 天 |
 | 产出文件 | `frontend/src/components/SettingsPanel/GlossaryEditor.vue` |
-| 依赖 | Task 2.2, 3.6 |
+| 依赖 | Task 2.2 |
 
 **子步骤：**
 
 - [ ] 3.8.1 实现术语表编辑 UI：表格形式增删改术语对
-- [ ] 3.8.2 提供 REST 端点：`GET/POST/DELETE /api/glossary`
+- [ ] 3.8.2 通过 IPC 命令读写 `config/glossary.json`（stdin `control:glossary_*` → Python 操作 GlossaryManager → stdout 返回结果）
 - [ ] 3.8.3 术语表变更实时生效（更新 PromptManager 注入内容）
 
 ---
@@ -907,12 +946,12 @@ imok/
 | 优先级 | P1 |
 | 预估 | 0.5 天 |
 | 产出文件 | `frontend/src/components/SettingsPanel/SceneEditor.vue` |
-| 依赖 | Task 2.4, 3.6 |
+| 依赖 | Task 2.4 |
 
 **子步骤：**
 
 - [ ] 3.9.1 实现场景配置编辑 UI：场景名称 + 详细描述
-- [ ] 3.9.2 提供 REST 端点：`GET/POST/DELETE /api/scenes`
+- [ ] 3.9.2 通过 IPC 命令读写 `config/scenes.json`（stdin `control:scene_*` → Python 操作 SceneManager → stdout 返回结果）
 - [ ] 3.9.3 闭麦面板支持切换当前场景
 
 ---
@@ -925,13 +964,13 @@ imok/
 | 优先级 | P1 |
 | 预估 | 0.5 天 |
 | 产出文件 | 更新 `MuteAssistPanel` |
-| 依赖 | Task 2.9, 3.6 |
+| 依赖 | Task 2.9 |
 
 **子步骤：**
 
 - [ ] 3.10.1 实现常用短语收藏功能（翻译结果旁加 ⭐ 收藏按钮）
 - [ ] 3.10.2 实现快捷短语面板（展示收藏的短语，点击即可复制）
-- [ ] 3.10.3 短语持久化到 SQLite
+- [ ] 3.10.3 短语持久化到 `config/phrases.json`（JSON 文件，全量读写）
 
 ---
 

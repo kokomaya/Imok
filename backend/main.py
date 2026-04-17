@@ -226,7 +226,7 @@ async def _run_subprocess(source_type: str) -> None:
     4. 收到 stdin control:stop → 停止 Pipeline → stdout STOPPED
     5. stdin EOF 或 SIGINT → 优雅退出
     """
-    from backend.config import load_llm_provider_config
+    from backend.config import get_settings, load_llm_provider_config
     from backend.ipc.messages import (
         ControlAction,
         IPCMessage,
@@ -236,6 +236,12 @@ async def _run_subprocess(source_type: str) -> None:
     from backend.ipc.subprocess_io import SubprocessReader, SubprocessWriter
     from backend.llm.client import CompanyLLMClient
     from backend.pipeline.meeting_pipeline import MeetingPipeline, TranscriptionEvent
+    from backend.storage.meeting_store import MeetingStore
+    from backend.storage.models import (
+        ActionItemRecord,
+        SummaryRecord,
+        TranscriptionEntry,
+    )
     from backend.summary.summary_coordinator import SummaryCoordinator
 
     logger = logging.getLogger(__name__)
@@ -247,6 +253,8 @@ async def _run_subprocess(source_type: str) -> None:
     pipeline = None
     summary_coordinator = None
     llm_client = None
+    meeting_store = MeetingStore(get_settings().paths.data_dir)
+    meeting_id: str | None = None
     stop_event = asyncio.Event()
     current_source_type = source_type
     # 持有事件循环引用，供从 reader 线程安全调度协程
@@ -299,9 +307,71 @@ async def _run_subprocess(source_type: str) -> None:
             verify_ssl=provider_cfg.ssl_verify,
         )
 
+    # ── 存储回调 ─────────────────────────────────────────
+
+    def _on_transcription_store(event: TranscriptionEvent) -> None:
+        """转写回调 → 追加到 JSONL 文件。"""
+        if meeting_id is None:
+            return
+        r = event.result
+        entry = TranscriptionEntry(
+            text=r.text,
+            timestamp=event.timestamp,
+            language=r.language,
+            confidence=r.language_probability,
+            segment_start=event.segment_start_time,
+            segment_end=event.segment_end_time,
+        )
+        try:
+            meeting_store.append_transcription(meeting_id, entry)
+        except Exception:
+            logger.exception("Failed to store transcription")
+
+    def _on_segment_summary_store(segment) -> None:
+        """段落摘要回调 → 保存到 summaries.json。"""
+        if meeting_id is None:
+            return
+        record = SummaryRecord(
+            summary_type="segment",
+            raw_text=segment.raw_text,
+            time_range=segment.time_range,
+            topics=segment.topics,
+            conclusions=segment.conclusions,
+            action_items=segment.action_items,
+        )
+        try:
+            meeting_store.add_segment_summary(meeting_id, record)
+        except Exception:
+            logger.exception("Failed to store segment summary")
+
+    def _on_global_summary_store(summary, action_items) -> None:
+        """全局摘要回调 → 保存到 summaries.json。"""
+        if meeting_id is None:
+            return
+        global_record = SummaryRecord(
+            summary_type="global",
+            raw_text=summary.raw_text,
+            segments_merged=summary.segments_merged,
+            merge_count=summary.merge_count,
+        )
+        item_records = [
+            ActionItemRecord(
+                description=ai.description,
+                assignee=ai.assignee,
+                deadline=ai.deadline,
+                status=ai.status.value if hasattr(ai.status, "value") else str(ai.status),
+                source=ai.source,
+            )
+            for ai in action_items
+        ]
+        try:
+            meeting_store.save_global_summary(meeting_id, global_record, item_records)
+        except Exception:
+            logger.exception("Failed to store global summary")
+
     async def _start_pipeline(src_type: str) -> MeetingPipeline:
         """创建并启动 Pipeline + SummaryCoordinator。"""
-        nonlocal summary_coordinator, llm_client
+        nonlocal summary_coordinator, llm_client, meeting_id
 
         writer.write(IPCMessage.status(ProcessState.LOADING, message="Loading models..."))
 
@@ -314,12 +384,27 @@ async def _run_subprocess(source_type: str) -> None:
             pl = MeetingPipeline(audio_src, vad, asr)
             pl.on_transcription(_on_transcription)
 
+            # 初始化存储（创建会议文件夹）
+            try:
+                meeting_id = meeting_store.create_meeting(
+                    title="", audio_source=src_type
+                )
+                pl.on_transcription(_on_transcription_store)
+                logger.info("Meeting storage initialized: %s", meeting_id)
+            except Exception:
+                logger.exception("Failed to initialize meeting storage, continuing without persistence")
+                meeting_id = None
+
             # 初始化总结模块（LLM 客户端 + 协调器）
             try:
                 llm_client = _create_llm_client()
                 summary_coordinator = SummaryCoordinator(llm_client)
                 summary_coordinator.on_segment_summary(_on_segment_summary)
                 summary_coordinator.on_global_summary(_on_global_summary)
+                # 注册存储回调（在 IPC 回调之后，保持解耦）
+                if meeting_id is not None:
+                    summary_coordinator.on_segment_summary(_on_segment_summary_store)
+                    summary_coordinator.on_global_summary(_on_global_summary_store)
                 pl.on_transcription(summary_coordinator.feed_transcription)
                 await summary_coordinator.start()
                 logger.info("Summary coordinator initialized.")
@@ -343,7 +428,7 @@ async def _run_subprocess(source_type: str) -> None:
             raise
 
     async def _stop_pipeline() -> None:
-        nonlocal pipeline, summary_coordinator, llm_client
+        nonlocal pipeline, summary_coordinator, llm_client, meeting_id
 
         if summary_coordinator is not None:
             try:
@@ -363,6 +448,14 @@ async def _run_subprocess(source_type: str) -> None:
             await pipeline.stop()
             pipeline = None
             writer.write(IPCMessage.status(ProcessState.STOPPED))
+
+        if meeting_id is not None:
+            try:
+                meeting_store.finish_meeting(meeting_id)
+                logger.info("Meeting finished: %s", meeting_id)
+            except Exception:
+                logger.exception("Error finishing meeting")
+            meeting_id = None
 
     def _handle_control(message: IPCMessage) -> None:
         """处理 stdin 控制命令（从 reader 线程调用，通过 main_loop 调度协程）。"""

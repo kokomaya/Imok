@@ -166,7 +166,7 @@ class PathSettings(BaseSettings):
     )
     data_dir: Path = Field(
         default=_PROJECT_ROOT / "data",
-        description="运行时数据目录（SQLite 等）",
+        description="运行时数据目录（会议记录等）",
     )
     glossary_file: Path = Field(
         default=_PROJECT_ROOT / "config" / "glossary.json",
