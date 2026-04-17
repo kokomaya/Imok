@@ -1,0 +1,17 @@
+{
+  "IPC": "IPC",
+  "AUTOSAR": "AUTOSAR",
+  "RTOS": "RTOS",
+  "总线": "bus",
+  "中间件": "middleware",
+  "功能安全": "functional safety",
+  "软件架构": "software architecture",
+  "接口定义": "interface definition",
+  "微控制器": "microcontroller",
+  "通信协议": "communication protocol",
+  "看门狗": "watchdog",
+  "引导程序": "bootloader",
+  "刷写": "flashing",
+  "诊断": "diagnostics",
+  "标定": "calibration"
+}

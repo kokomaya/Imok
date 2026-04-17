@@ -1,0 +1,28 @@
+{
+  "scenes": [
+    {
+      "id": "internal_tech",
+      "name": "跨国团队内部技术讨论会",
+      "description": "跨国团队内部技术讨论会，参与者为软件工程师和架构师，讨论内容涉及嵌入式系统、汽车软件、IPC 通信等技术话题。表达风格应直接、专业、简洁。",
+      "is_default": true
+    },
+    {
+      "id": "customer_meeting",
+      "name": "客户交流会议",
+      "description": "与外部客户的正式交流会议，需要使用更加礼貌、正式的表达方式，避免过于随意的口语表达。",
+      "is_default": false
+    },
+    {
+      "id": "supplier_meeting",
+      "name": "供应商交流会议",
+      "description": "与供应商的技术交流或商务会议，需要清晰表达需求和期望，语气专业且合作导向。",
+      "is_default": false
+    },
+    {
+      "id": "expert_review",
+      "name": "外部技术专家评审",
+      "description": "与外部技术专家的评审会议，需要准确使用技术术语，表达严谨，适当使用学术化表达。",
+      "is_default": false
+    }
+  ]
+}
