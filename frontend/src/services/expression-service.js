@@ -19,18 +19,15 @@ let config = null;
 /** 当前进行中的 AbortController */
 let activeController = null;
 
-/** 表达辅助 prompt 模板 */
-const EXPRESSION_PROMPT = `你是会议中的英文表达助手，请将用户输入的中文立即转换为适合会议交流的英文说法。
+/** 系统提示词 */
+const SYSTEM_PROMPT = `你是会议中的英文表达助手，请将用户输入的中文立即转换为适合会议交流的英文说法。
 要求：
 - 保持原意准确
 - 表达自然、简洁、礼貌
 - 优先使用口语化会议表达
 - 不添加解释，不输出多个版本
 - 如果输入是口语转写结果，自动修正明显口误或 ASR 噪声后再输出
-- 仅输出英文结果
-
-输入：
-{text}`;
+- 仅输出英文结果`;
 
 /**
  * 初始化表达服务配置。
@@ -58,11 +55,12 @@ async function express(inputText) {
 
   const id = muteAssistStore.startExpression(text);
 
-  const prompt = EXPRESSION_PROMPT.replace('{text}', text);
-
   try {
     const result = await window.electronAPI.llmChat({
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: text },
+      ],
       temperature: 0.3,
       max_tokens: 512,
     });

@@ -339,7 +339,7 @@ function initPythonBridge() {
   pythonBridge = new PythonBridge({
     pythonPath: IS_DEV ? path.resolve(BACKEND_ROOT, '.venv', 'Scripts', 'python') : 'python',
     backendDir: BACKEND_ROOT,
-    source: 'wasapi',
+    source: 'mic',
     logLevel: IS_DEV ? 'DEBUG' : 'INFO',
   });
 
