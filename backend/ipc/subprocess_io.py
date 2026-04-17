@@ -31,6 +31,15 @@ class SubprocessWriter:
 
     def __init__(self, stream=None) -> None:
         self._stream = stream or sys.stdout
+        # Windows 下 stdout 可能用 cp1252 编码，需要强制 UTF-8
+        if (
+            self._stream is sys.stdout
+            and hasattr(self._stream, "reconfigure")
+        ):
+            try:
+                self._stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
         self._lock = threading.Lock()
         self._closed = False
 
@@ -71,6 +80,15 @@ class SubprocessReader:
 
     def __init__(self, stream=None) -> None:
         self._stream = stream or sys.stdin
+        # Windows 下 stdin 可能用 cp1252 编码，需要强制 UTF-8
+        if (
+            self._stream is sys.stdin
+            and hasattr(self._stream, "reconfigure")
+        ):
+            try:
+                self._stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
         self._handlers: dict[str, Callable[[IPCMessage], None]] = {}
         self._running = False
         self._task: Optional[asyncio.Task] = None

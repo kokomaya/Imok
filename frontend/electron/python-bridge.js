@@ -166,6 +166,7 @@ class PythonBridge extends EventEmitter {
       stdio: ['pipe', 'pipe', 'pipe'],
       // Windows 上不使用 shell，避免额外的 cmd.exe 包装
       shell: false,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
     });
 
     this._lineBuffer = '';

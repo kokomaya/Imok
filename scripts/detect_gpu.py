@@ -33,7 +33,9 @@ def detect_gpu() -> GPUInfo:
             raise RuntimeError("CUDA not available")
 
         device_name = torch.cuda.get_device_name(0)
-        vram_mb = torch.cuda.get_device_properties(0).total_mem // (1024 * 1024)
+        props = torch.cuda.get_device_properties(0)
+        total_bytes = getattr(props, "total_memory", None) or getattr(props, "total_mem", 0)
+        vram_mb = total_bytes // (1024 * 1024)
         cuda_version = torch.version.cuda or "unknown"
 
         # 根据显存大小推荐模型

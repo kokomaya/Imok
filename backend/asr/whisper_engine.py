@@ -184,10 +184,26 @@ class WhisperEngine(ASREngine):
 
             from faster_whisper import WhisperModel
 
-            self._model = WhisperModel(
-                self._model_size,
-                device=self._device,
-                compute_type=self._compute_type,
-            )
+            try:
+                self._model = WhisperModel(
+                    self._model_size,
+                    device=self._device,
+                    compute_type=self._compute_type,
+                )
+            except RuntimeError as exc:
+                if self._device == "cuda" and "out of memory" in str(exc).lower():
+                    logger.warning(
+                        "CUDA OOM loading %s model, falling back to CPU int8.",
+                        self._model_size,
+                    )
+                    self._device = "cpu"
+                    self._compute_type = "int8"
+                    self._model = WhisperModel(
+                        self._model_size,
+                        device="cpu",
+                        compute_type="int8",
+                    )
+                else:
+                    raise
 
             logger.info("Whisper model loaded successfully.")

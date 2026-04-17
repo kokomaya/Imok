@@ -196,6 +196,17 @@ function initPythonBridge() {
     console.error('[PythonBridge Error]', data);
     broadcast('python:bridge-error', data);
   });
+
+  // 收到 ready 状态后自动开始音频采集
+  pythonBridge.on('status', (data) => {
+    if (data.state === 'ready') {
+      console.log('[PythonBridge] Ready, sending start command...');
+      pythonBridge.sendControl('start');
+    }
+  });
+
+  // 自动启动子进程
+  pythonBridge.start();
 }
 
 // ---------------------------------------------------------------
