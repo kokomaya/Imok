@@ -22,6 +22,10 @@ const levels = reactive({});
 const WAVE_LEN = 32;
 const waveHistory = reactive({});
 
+// ── 测试结果内联显示 { 'loopback-5': { text, icon, timer } }
+const testResults = reactive({});
+const testingDevices = reactive({});
+
 let cleanupLevelListener = null;
 
 async function fetchDevices() {
@@ -65,7 +69,6 @@ function selectDevice(type, index) {
   }
   emit('select-device', { type, index });
 
-  // 通知 main 进程
   if (window.electronAPI?.sendControl) {
     window.electronAPI.sendControl('set_devices', {
       loopback_device: selectedLoopback.value,
@@ -76,33 +79,43 @@ function selectDevice(type, index) {
 
 async function testDevice(type, index) {
   if (!window.electronAPI?.testAudioDevice) return;
+  const key = `${type}-${index}`;
+
+  // 清除之前的结果
+  if (testResults[key]?.timer) clearTimeout(testResults[key].timer);
+  testingDevices[key] = true;
+  delete testResults[key];
+
   try {
     const result = await window.electronAPI.testAudioDevice({ type, index, seconds: 2 });
+    testingDevices[key] = false;
     if (result.ok) {
       const peakDb = result.peak > 0 ? (20 * Math.log10(result.peak)).toFixed(1) : '-∞';
       const icon = result.hasSignal ? '✅' : '⚠️';
-      alert(`${icon} 测试完成\n峰值: ${peakDb} dB\n${result.hasSignal ? '检测到信号' : '未检测到信号'}`);
+      const text = result.hasSignal ? `${peakDb} dB` : '无信号';
+      showTestResult(key, icon, text);
     } else {
-      alert('测试失败: ' + (result.error || '未知错误'));
+      showTestResult(key, '❌', result.error || '失败');
     }
   } catch (e) {
-    alert('测试失败: ' + e.message);
+    testingDevices[key] = false;
+    showTestResult(key, '❌', e.message);
   }
 }
 
-/**
- * 从波形历史数据生成 SVG path d 属性 (平滑曲线)
- */
+function showTestResult(key, icon, text) {
+  const timer = setTimeout(() => { delete testResults[key]; }, 4000);
+  testResults[key] = { icon, text, timer };
+}
+
 function getWavePath(sourceKey) {
   const hist = waveHistory[sourceKey];
   if (!hist || hist.length < 2) return '';
-  const w = 200;
-  const h = 28;
+  const w = 120;
+  const h = 22;
   const step = w / (WAVE_LEN - 1);
-  // 将 RMS 映射到高度，使用对数缩放让小信号也可见
   const toY = (rms) => {
     if (rms <= 0) return h;
-    // 对数缩放: -60dB 到 0dB 映射到 h 到 2
     const db = 20 * Math.log10(Math.max(rms, 1e-6));
     const norm = Math.max(0, Math.min(1, (db + 60) / 60));
     return h - norm * (h - 2);
@@ -112,15 +125,11 @@ function getWavePath(sourceKey) {
   for (let i = 1; i < hist.length; i++) {
     const x = i * step;
     const y = toY(hist[i]);
-    // 简单的线段连接
     d += ` L${x.toFixed(1)},${y.toFixed(1)}`;
   }
   return d;
 }
 
-/**
- * 获取电平百分比 (0-100)，用对数缩放
- */
 function getLevelPercent(sourceKey) {
   const rms = levels[sourceKey] || 0;
   if (rms <= 0) return 0;
@@ -128,31 +137,22 @@ function getLevelPercent(sourceKey) {
   return Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
 }
 
-/**
- * 获取电平条颜色
- */
 function getLevelColor(sourceKey) {
   const pct = getLevelPercent(sourceKey);
-  if (pct > 85) return '#ef5350';   // 红色 - 过大
-  if (pct > 50) return '#ff9800';   // 橙色 - 偏高
-  if (pct > 10) return '#4caf50';   // 绿色 - 正常
-  return '#bdbdbd';                  // 灰色 - 无信号
+  if (pct > 85) return '#ef5350';
+  if (pct > 50) return '#ff9800';
+  if (pct > 10) return '#4caf50';
+  return '#bdbdbd';
 }
 
-const activeSourceKeys = computed(() => Object.keys(levels));
-
-// 映射 source key (wasapi/mic) 到设备类型
-function sourceKeyToType(key) {
-  if (key === 'wasapi' || key === 'system') return 'loopback';
-  if (key === 'mic') return 'mic';
-  return key;
+// 映射 section 到 level source key
+function sectionLevelKey(type) {
+  return type === 'loopback' ? 'wasapi' : 'mic';
 }
 
-function sourceKeyLabel(key) {
-  if (key === 'wasapi' || key === 'system') return '🔊 系统音频';
-  if (key === 'mic') return '🎤 麦克风';
-  if (key === 'main') return '🎵 音频输入';
-  return key;
+function hasLevel(type) {
+  const key = sectionLevelKey(type);
+  return levels[key] !== undefined;
 }
 
 watch(() => props.visible, (v) => {
@@ -168,13 +168,17 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (cleanupLevelListener) cleanupLevelListener();
+  // 清理所有测试结果的定时器
+  for (const r of Object.values(testResults)) {
+    if (r?.timer) clearTimeout(r.timer);
+  }
 });
 </script>
 
 <template>
   <div v-if="visible" class="adp">
     <div class="adp-header">
-      <span class="adp-title">🎛 音频设备监控</span>
+      <span class="adp-title">🎛 音频设备</span>
       <div class="adp-header-actions">
         <button class="adp-btn-small" @click="fetchDevices" :disabled="loading" title="刷新设备列表">🔄</button>
         <button class="adp-close" @click="$emit('close')">✕</button>
@@ -184,27 +188,22 @@ onUnmounted(() => {
     <div v-if="error" class="adp-error">{{ error }}</div>
     <div v-if="loading" class="adp-loading">扫描设备…</div>
 
-    <!-- 实时电平监控区域 -->
-    <div v-if="activeSourceKeys.length > 0" class="adp-section">
-      <div class="adp-section-title">实时电平</div>
-      <div v-for="key in activeSourceKeys" :key="key" class="adp-level-row">
-        <span class="adp-level-label">{{ sourceKeyLabel(key) }}</span>
-        <div class="adp-level-bar-container">
-          <div class="adp-level-bar" :style="{ width: getLevelPercent(key) + '%', background: getLevelColor(key) }"></div>
-        </div>
-        <svg class="adp-wave" viewBox="0 0 200 28" preserveAspectRatio="none">
-          <path :d="getWavePath(key)" fill="none" :stroke="getLevelColor(key)" stroke-width="1.5" />
-        </svg>
-      </div>
-    </div>
-    <div v-else class="adp-no-signal">
-      <span class="adp-no-signal-icon">📡</span>
-      <span>开始会议后将显示实时音频电平</span>
-    </div>
-
-    <!-- 系统音频设备列表 -->
+    <!-- ═══ 系统音频 ═══ -->
     <div class="adp-section">
-      <div class="adp-section-title">🔊 系统音频 (Loopback)</div>
+      <div class="adp-section-header">
+        <span class="adp-section-title">🔊 系统音频</span>
+        <!-- 活跃时的实时电平 -->
+        <div v-if="hasLevel('loopback')" class="adp-inline-monitor">
+          <div class="adp-level-bar-container">
+            <div class="adp-level-bar" :style="{ width: getLevelPercent('wasapi') + '%', background: getLevelColor('wasapi') }"></div>
+          </div>
+          <svg class="adp-wave" viewBox="0 0 120 22" preserveAspectRatio="none">
+            <path :d="getWavePath('wasapi')" fill="none" :stroke="getLevelColor('wasapi')" stroke-width="1.5" />
+          </svg>
+        </div>
+        <span v-else class="adp-monitor-placeholder">未活跃</span>
+      </div>
+
       <div v-if="devices.loopback.length === 0" class="adp-empty">无可用设备</div>
       <div
         v-for="dev in devices.loopback"
@@ -221,15 +220,39 @@ onUnmounted(() => {
           <span class="adp-device-meta">{{ dev.hostApi }} · {{ dev.sampleRate }}Hz · {{ dev.maxInputChannels }}ch</span>
         </div>
         <div class="adp-device-actions">
+          <!-- 测试结果内联 -->
+          <transition name="adp-fade">
+            <span v-if="testResults[`loopback-${dev.index}`]" class="adp-test-result">
+              {{ testResults[`loopback-${dev.index}`].icon }} {{ testResults[`loopback-${dev.index}`].text }}
+            </span>
+          </transition>
+          <span v-if="testingDevices[`loopback-${dev.index}`]" class="adp-testing">测试中…</span>
           <span v-if="selectedLoopback === dev.index" class="adp-active-indicator" title="当前选中">✓</span>
-          <button class="adp-btn-test" @click.stop="testDevice('loopback', dev.index)" title="测试此设备">测试</button>
+          <button
+            class="adp-btn-test"
+            @click.stop="testDevice('loopback', dev.index)"
+            :disabled="testingDevices[`loopback-${dev.index}`]"
+            title="测试此设备"
+          >测试</button>
         </div>
       </div>
     </div>
 
-    <!-- 麦克风设备列表 -->
+    <!-- ═══ 麦克风 ═══ -->
     <div class="adp-section">
-      <div class="adp-section-title">🎤 麦克风 (Input)</div>
+      <div class="adp-section-header">
+        <span class="adp-section-title">🎤 麦克风</span>
+        <div v-if="hasLevel('mic')" class="adp-inline-monitor">
+          <div class="adp-level-bar-container">
+            <div class="adp-level-bar" :style="{ width: getLevelPercent('mic') + '%', background: getLevelColor('mic') }"></div>
+          </div>
+          <svg class="adp-wave" viewBox="0 0 120 22" preserveAspectRatio="none">
+            <path :d="getWavePath('mic')" fill="none" :stroke="getLevelColor('mic')" stroke-width="1.5" />
+          </svg>
+        </div>
+        <span v-else class="adp-monitor-placeholder">未活跃</span>
+      </div>
+
       <div v-if="devices.input.length === 0" class="adp-empty">无可用设备</div>
       <div
         v-for="dev in devices.input"
@@ -246,8 +269,19 @@ onUnmounted(() => {
           <span class="adp-device-meta">{{ dev.hostApi }} · {{ dev.sampleRate }}Hz · {{ dev.maxInputChannels }}ch</span>
         </div>
         <div class="adp-device-actions">
+          <transition name="adp-fade">
+            <span v-if="testResults[`mic-${dev.index}`]" class="adp-test-result">
+              {{ testResults[`mic-${dev.index}`].icon }} {{ testResults[`mic-${dev.index}`].text }}
+            </span>
+          </transition>
+          <span v-if="testingDevices[`mic-${dev.index}`]" class="adp-testing">测试中…</span>
           <span v-if="selectedMic === dev.index" class="adp-active-indicator" title="当前选中">✓</span>
-          <button class="adp-btn-test" @click.stop="testDevice('mic', dev.index)" title="测试此设备">测试</button>
+          <button
+            class="adp-btn-test"
+            @click.stop="testDevice('mic', dev.index)"
+            :disabled="testingDevices[`mic-${dev.index}`]"
+            title="测试此设备"
+          >测试</button>
         </div>
       </div>
     </div>
@@ -331,7 +365,7 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
-/* ── 实时电平区域 ── */
+/* ── Section ── */
 
 .adp-section {
   padding: 6px 12px;
@@ -342,65 +376,58 @@ onUnmounted(() => {
   border-bottom: none;
 }
 
+.adp-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
 .adp-section-title {
   font-size: 11px;
   font-weight: 600;
   color: #666;
-  margin-bottom: 6px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
+  flex-shrink: 0;
 }
 
-.adp-level-row {
+/* ── 内联实时电平（标题行右侧） ── */
+
+.adp-inline-monitor {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-  height: 28px;
-}
-
-.adp-level-label {
-  font-size: 12px;
-  color: #555;
-  flex-shrink: 0;
-  width: 80px;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
 .adp-level-bar-container {
-  flex: 0 0 80px;
-  height: 8px;
+  flex: 0 0 70px;
+  height: 6px;
   background: #eee;
-  border-radius: 4px;
+  border-radius: 3px;
   overflow: hidden;
 }
 
 .adp-level-bar {
   height: 100%;
-  border-radius: 4px;
+  border-radius: 3px;
   transition: width 0.15s ease-out, background 0.3s;
   min-width: 0;
 }
 
 .adp-wave {
   flex: 1;
-  height: 28px;
-  min-width: 60px;
+  height: 22px;
+  min-width: 40px;
+  max-width: 120px;
 }
 
-.adp-no-signal {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 16px 12px;
-  color: #999;
-  font-size: 12px;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.adp-no-signal-icon {
-  font-size: 16px;
-  opacity: 0.5;
+.adp-monitor-placeholder {
+  font-size: 10px;
+  color: #bbb;
+  font-style: italic;
 }
 
 /* ── 设备列表 ── */
@@ -434,12 +461,13 @@ onUnmounted(() => {
 }
 
 .adp-device-main {
-  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  flex: 1;
 }
 
 .adp-device-name {
-  display: block;
   font-size: 12px;
   color: #333;
   white-space: nowrap;
@@ -493,5 +521,48 @@ onUnmounted(() => {
   background: #e3f2fd;
   border-color: #90caf9;
   color: #1565c0;
+}
+
+.adp-btn-test:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 内联测试结果 ── */
+
+.adp-test-result {
+  font-size: 10px;
+  color: #333;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #f5f5f5;
+}
+
+.adp-testing {
+  font-size: 10px;
+  color: #1565c0;
+  white-space: nowrap;
+  animation: adp-pulse 1s ease-in-out infinite;
+}
+
+@keyframes adp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── 淡入淡出过渡 ── */
+
+.adp-fade-enter-active {
+  transition: opacity 0.2s ease;
+}
+
+.adp-fade-leave-active {
+  transition: opacity 0.6s ease;
+}
+
+.adp-fade-enter-from,
+.adp-fade-leave-to {
+  opacity: 0;
 }
 </style>
