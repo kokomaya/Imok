@@ -33,6 +33,8 @@ const INVOKE_CHANNELS = [
   'meeting:load',
   'meeting:delete',
   'meeting:save-summaries',
+  'audio:list-devices',
+  'audio:test-device',
 ];
 
 /** 允许从 main 发往 renderer 的 on 通道 */
@@ -220,5 +222,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   syncAudioState: (state) => {
     ipcRenderer.send('menu:audio-state', state);
+  },
+
+  /**
+   * 列出可用音频设备。
+   * @returns {Promise<{ ok: boolean, loopback?: Array, input?: Array, error?: string }>}
+   */
+  listAudioDevices: () => {
+    return ipcRenderer.invoke('audio:list-devices');
+  },
+
+  /**
+   * 测试音频设备（短录音 + 音量检测）。
+   * @param {{ type: 'loopback'|'mic', index: number, seconds?: number }} params
+   * @returns {Promise<{ ok: boolean, peak?: number, rms?: number, hasSignal?: boolean, error?: string }>}
+   */
+  testAudioDevice: (params) => {
+    return ipcRenderer.invoke('audio:test-device', params);
   },
 });

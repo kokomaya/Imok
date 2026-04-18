@@ -48,6 +48,7 @@ class ControlAction(str, Enum):
     START = "start"  # 开始音频采集和识别
     STOP = "stop"  # 停止
     SWITCH_SOURCE = "switch_source"  # 切换音频源
+    SET_DEVICES = "set_devices"  # 设置音频设备索引
     TRIGGER_SEGMENT_SUMMARY = "trigger_segment_summary"  # 手动触发段落摘要
     TRIGGER_GLOBAL_SUMMARY = "trigger_global_summary"  # 手动触发全局摘要
     SET_SUMMARY_INTERVAL = "set_summary_interval"  # 设置自动摘要间隔（秒）

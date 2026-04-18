@@ -118,7 +118,7 @@ function syncAudioStateToMenu() {
   });
 }
 
-function handleMenuAction(action) {
+function handleMenuAction(action, data) {
   switch (action) {
     case 'start-meeting':
       startMeeting();
@@ -160,6 +160,15 @@ function handleMenuAction(action) {
       break;
     case 'clear-transcriptions':
       clearTranscriptions();
+      break;
+    case 'device-testing':
+      status.value = `测试 ${data?.type === 'loopback' ? '系统音频' : '麦克风'} 设备…`;
+      break;
+    case 'device-test-result':
+      status.value = meetingActive.value ? 'running' : 'ready';
+      break;
+    case 'device-changed':
+      // 设备已在 main.js 侧更新，仅做 UI 反馈
       break;
   }
 }
@@ -246,8 +255,8 @@ onMounted(async () => {
 
   // 菜单栏操作 → 复用工具栏逻辑
   cleanupFns.push(
-    window.electronAPI.on('menu:action', (action) => {
-      handleMenuAction(action);
+    window.electronAPI.on('menu:action', (action, data) => {
+      handleMenuAction(action, data);
     }),
   );
 

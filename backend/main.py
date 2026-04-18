@@ -166,17 +166,21 @@ async def _run_cli(source_type: str) -> None:
         )
 
 
-def _create_audio_source(source_type: str):
+def _create_audio_source(source_type: str, *, loopback_device=None, mic_device=None):
     """创建音频源。
 
     支持的 source_type:
     - 'wasapi': 仅系统音频
     - 'mic': 仅麦克风
     - 'both': 系统音频 + 麦克风混合
+
+    设备索引优先级: 参数 > 配置文件 > 自动检测(None)
     """
     from backend.config import get_settings
 
     settings = get_settings()
+    lb_idx = loopback_device if loopback_device is not None else settings.audio.loopback_device
+    mic_idx = mic_device if mic_device is not None else settings.audio.mic_device
 
     if source_type == "both":
         from backend.audio.mixer import AudioMixer
@@ -192,6 +196,7 @@ def _create_audio_source(source_type: str):
             WASAPILoopbackSource(
                 target_sample_rate=settings.audio.sample_rate,
                 chunk_frames=settings.audio.chunk_frames,
+                device_index=lb_idx,
             ),
         )
         mixer.add_source(
@@ -199,7 +204,7 @@ def _create_audio_source(source_type: str):
             MicrophoneSource(
                 target_sample_rate=settings.audio.sample_rate,
                 chunk_frames=settings.audio.chunk_frames,
-                device_index=settings.audio.mic_device,
+                device_index=mic_idx,
             ),
         )
         return mixer
@@ -209,6 +214,7 @@ def _create_audio_source(source_type: str):
         return WASAPILoopbackSource(
             target_sample_rate=settings.audio.sample_rate,
             chunk_frames=settings.audio.chunk_frames,
+            device_index=lb_idx,
         )
     else:
         from backend.audio.mic_source import MicrophoneSource
@@ -216,7 +222,7 @@ def _create_audio_source(source_type: str):
         return MicrophoneSource(
             target_sample_rate=settings.audio.sample_rate,
             chunk_frames=settings.audio.chunk_frames,
-            device_index=settings.audio.mic_device,
+            device_index=mic_idx,
         )
 
 
@@ -289,6 +295,9 @@ async def _run_subprocess(source_type: str) -> None:
     meeting_id: str | None = None
     stop_event = asyncio.Event()
     current_source_type = source_type
+    # 用户选择的音频设备索引（None = 自动/默认）
+    selected_loopback_device: int | None = None
+    selected_mic_device: int | None = None
     # 持有事件循环引用，供从 reader 线程安全调度协程
     main_loop = asyncio.get_running_loop()
 
@@ -410,7 +419,11 @@ async def _run_subprocess(source_type: str) -> None:
         writer.write(IPCMessage.status(ProcessState.LOADING, message="Loading models..."))
 
         try:
-            audio_src = _create_audio_source(src_type)
+            audio_src = _create_audio_source(
+                src_type,
+                loopback_device=selected_loopback_device,
+                mic_device=selected_mic_device,
+            )
             vad = _create_vad()
             asr = _create_asr()
             asr.load()
@@ -551,6 +564,14 @@ async def _run_subprocess(source_type: str) -> None:
                     logger.warning("Cannot set summary interval: coordinator not initialized")
             else:
                 writer.write(IPCMessage.error("invalid_interval", f"Invalid interval: {interval}"))
+        elif action == ControlAction.SET_DEVICES:
+            nonlocal selected_loopback_device, selected_mic_device
+            lb = message.data.get("loopback_device")
+            mic = message.data.get("mic_device")
+            selected_loopback_device = int(lb) if lb is not None else None
+            selected_mic_device = int(mic) if mic is not None else None
+            logger.info("Device selection updated: loopback=%s, mic=%s",
+                        selected_loopback_device, selected_mic_device)
         else:
             logger.warning("Unknown control action: %s", action)
 
