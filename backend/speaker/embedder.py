@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 # 模型要求的采样率
 _EMBEDDING_SAMPLE_RATE = 16000
 
-# 最短有效音频（0.5 秒），太短的段不足以提取可靠的说话人特征
-_MIN_DURATION_S = 0.5
+# 最短有效音频（1.0 秒），太短的段不足以提取可靠的说话人特征
+_MIN_DURATION_S = 1.0
 
 
 class SpeakerEmbedder(SpeakerEmbedderBase):
@@ -55,16 +55,23 @@ class SpeakerEmbedder(SpeakerEmbedderBase):
         if self._model is not None:
             return
 
+        import sys
+
         from speechbrain.inference.speaker import EncoderClassifier
+        from speechbrain.utils.fetching import LocalStrategy
 
         logger.info("Loading speaker embedding model (ECAPA-TDNN)...")
         source = "speechbrain/spkrec-ecapa-voxceleb"
         save_dir = str(self._model_dir) if self._model_dir else None
 
+        # Windows 下使用 COPY 策略，避免 symlink 权限问题 (WinError 1314)
+        strategy = LocalStrategy.COPY if sys.platform == "win32" else LocalStrategy.SYMLINK
+
         self._model = EncoderClassifier.from_hparams(
             source=source,
             savedir=save_dir or "pretrained_models/spkrec-ecapa-voxceleb",
             run_opts={"device": self._device},
+            local_strategy=strategy,
         )
         logger.info("Speaker embedding model loaded on %s.", self._device)
 
@@ -97,4 +104,10 @@ class SpeakerEmbedder(SpeakerEmbedderBase):
         # embedding shape: [1, 1, 192] → squeeze to [192]
         vec = embedding.squeeze().cpu().numpy().astype(np.float32)
         self._embedding_dim = vec.shape[0]
+
+        # L2 归一化 — 确保余弦相似度计算和质心平均的稳定性
+        norm = np.linalg.norm(vec)
+        if norm > 1e-9:
+            vec = vec / norm
+
         return vec

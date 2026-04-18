@@ -248,8 +248,13 @@ class MeetingPipeline:
                     )
                     if embedding is not None:
                         speaker = self._speaker_tracker.identify(embedding)
+                    else:
+                        logger.debug(
+                            "Speaker embedding returned None for segment %.2f-%.2f s (too short?)",
+                            segment.start_time, segment.end_time,
+                        )
                 except Exception:
-                    logger.debug("Speaker identification failed, continuing without.", exc_info=True)
+                    logger.warning("Speaker identification failed, continuing without.", exc_info=True)
 
             event = TranscriptionEvent(
                 result=result,

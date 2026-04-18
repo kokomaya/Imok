@@ -425,7 +425,7 @@ async def _run_subprocess(source_type: str) -> None:
                 speaker_tracker = SpeakerTracker()
                 logger.info("Speaker diarization enabled.")
             except Exception:
-                logger.info("Speaker diarization unavailable, continuing without.")
+                logger.warning("Speaker diarization unavailable, continuing without.", exc_info=True)
 
             pl = MeetingPipeline(
                 audio_src, vad, asr,

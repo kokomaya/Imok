@@ -23,7 +23,8 @@ from backend.speaker.base import SpeakerTrackerBase
 logger = logging.getLogger(__name__)
 
 # 默认余弦相似度阈值 — 高于此值认为是同一个人
-_DEFAULT_THRESHOLD = 0.65
+# 使用 L2 归一化嵌入向量时，同一说话人典型相似度 0.5–0.9，不同说话人典型 0.0–0.3
+_DEFAULT_THRESHOLD = 0.40
 
 # 最大说话人数量 — 防止无限增长
 _MAX_SPEAKERS = 20
@@ -92,6 +93,11 @@ class SpeakerTracker(SpeakerTrackerBase):
             if sim > best_sim:
                 best_sim = sim
                 best_id = sid
+
+        logger.debug(
+            "Speaker match: best=%s sim=%.3f threshold=%.2f",
+            best_id, best_sim, self._threshold,
+        )
 
         if best_sim >= self._threshold and best_id is not None:
             # 匹配到已知说话人 — 更新其质心
