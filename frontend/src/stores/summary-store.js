@@ -67,6 +67,9 @@ const state = reactive({
 
   /** 当前实时会议 ID（由 App.vue 根据 python:status 设置） */
   liveMeetingId: '',
+
+  /** 实时模式下的转写文本列表（由 App.vue 喂入，供前端降级生成摘要） @type {{ text: string, timestamp: number }[]} */
+  liveTranscriptions: [],
 });
 
 // ── 脏检测 ──
@@ -161,6 +164,7 @@ function clearAll() {
   state.reviewMeetingId = '';
   state.liveMeetingId = '';
   state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length);
+  state.liveTranscriptions.splice(0, state.liveTranscriptions.length);
   _savedHash = '';
 }
 
@@ -189,6 +193,14 @@ function clearReviewData() {
  */
 function setLiveMeetingId(meetingId) {
   state.liveMeetingId = meetingId;
+}
+
+/**
+ * 追加一条实时转写文本。
+ * @param {{ text: string, timestamp: number }} entry
+ */
+function addLiveTranscription(entry) {
+  state.liveTranscriptions.push(entry);
 }
 
 /** 所有主题（从所有段落摘要合并去重） */
@@ -272,6 +284,7 @@ export const summaryStore = {
   setReviewData,
   clearReviewData,
   setLiveMeetingId,
+  addLiveTranscription,
   markSaved,
   getSummariesForSave,
 };

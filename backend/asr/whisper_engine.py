@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import List, Optional
 
 import numpy as np
@@ -48,7 +49,15 @@ class WhisperEngine(ASREngine):
 
     模型懒加载：__init__ 仅记录配置，首次 transcribe() 时才加载模型。
     线程安全：模型加载使用 threading.Lock 保护，避免并发初始化。
+
+    语言缓存：当 language=None（自动检测）时，首次检测到高概率语言后缓存，
+    后续推理使用缓存语言以节省 ~1s/段。调用 reset_language_cache() 可重置。
     """
+
+    # 语言缓存需要连续 N 次一致检测才锁定
+    _LANG_CACHE_THRESHOLD = 3
+    # 语言检测概率需达到此值才计入一致性判断
+    _LANG_PROB_MIN = 0.8
 
     def __init__(self, settings: Optional[ASRSettings] = None) -> None:
         resolved = (settings or ASRSettings()).resolve_with_gpu()
@@ -61,12 +70,18 @@ class WhisperEngine(ASREngine):
         self._model = None  # WhisperModel, lazily loaded
         self._load_lock = threading.Lock()
 
+        # 语言缓存状态
+        self._cached_language: Optional[str] = None
+        self._lang_detect_streak: int = 0
+        self._last_detected_lang: Optional[str] = None
+
         logger.info(
-            "WhisperEngine configured: model=%s, device=%s, compute=%s, beam=%d",
+            "WhisperEngine configured: model=%s, device=%s, compute=%s, beam=%d, lang=%s",
             self._model_size,
             self._device,
             self._compute_type,
             self._beam_size,
+            self._language or "auto",
         )
 
     def transcribe(
@@ -85,9 +100,11 @@ class WhisperEngine(ASREngine):
         """
         self._ensure_loaded()
 
-        lang = language or self._language
+        # 语言优先级：参数 > 配置 > 缓存 > None（自动检测）
+        lang = language or self._language or self._cached_language
         duration_s = len(audio) / _WHISPER_SAMPLE_RATE
 
+        t0 = time.monotonic()
         try:
             segments_iter, info = self._model.transcribe(
                 audio,
@@ -95,6 +112,7 @@ class WhisperEngine(ASREngine):
                 language=lang,
                 word_timestamps=True,
                 vad_filter=False,  # 我们使用独立的 Silero-VAD，不需要内置过滤
+                condition_on_previous_text=False,  # 段间独立，避免错误传播
             )
 
             segments: List[TranscriptionSegment] = []
@@ -132,12 +150,20 @@ class WhisperEngine(ASREngine):
                 duration_s=duration_s,
             )
 
+            elapsed = time.monotonic() - t0
+            # 更新语言缓存（仅当未显式指定语言时）
+            if not (language or self._language):
+                self._update_language_cache(info.language, info.language_probability)
+
             logger.debug(
-                "Transcribed %.1fs audio → '%s' [%s, prob=%.2f]",
+                "Transcribed %.1fs audio in %.2fs (RTF=%.2f) → '%s' [%s prob=%.2f, lang_hint=%s]",
                 duration_s,
+                elapsed,
+                elapsed / max(duration_s, 0.01),
                 full_text[:80],
                 info.language,
                 info.language_probability,
+                lang or "auto",
             )
             return result
 
@@ -164,6 +190,33 @@ class WhisperEngine(ASREngine):
     def load(self) -> None:
         """显式预加载 Whisper 模型，避免首次 transcribe() 的延迟。"""
         self._ensure_loaded()
+
+    def reset_language_cache(self) -> None:
+        """重置语言缓存，恢复自动检测。每次新会议开始时调用。"""
+        self._cached_language = None
+        self._lang_detect_streak = 0
+        self._last_detected_lang = None
+        logger.debug("Language cache reset.")
+
+    def _update_language_cache(self, detected_lang: str, probability: float) -> None:
+        """更新语言缓存：连续 N 次高概率一致检测后锁定语言。"""
+        if probability < self._LANG_PROB_MIN:
+            # 低概率检测不参与缓存判断
+            return
+
+        if detected_lang == self._last_detected_lang:
+            self._lang_detect_streak += 1
+        else:
+            self._last_detected_lang = detected_lang
+            self._lang_detect_streak = 1
+
+        if self._lang_detect_streak >= self._LANG_CACHE_THRESHOLD and self._cached_language != detected_lang:
+            self._cached_language = detected_lang
+            logger.info(
+                "Language locked to '%s' after %d consistent detections (saves ~1s/segment).",
+                detected_lang,
+                self._lang_detect_streak,
+            )
 
     def _ensure_loaded(self) -> None:
         """懒加载模型 — 首次调用时加载，线程安全。"""
@@ -192,14 +245,18 @@ class WhisperEngine(ASREngine):
                 )
             except RuntimeError as exc:
                 if self._device == "cuda" and "out of memory" in str(exc).lower():
+                    # CPU 上大模型太慢，降级到 small 以保证实时性
+                    cpu_model = "small" if self._model_size in ("large-v3", "medium") else self._model_size
                     logger.warning(
-                        "CUDA OOM loading %s model, falling back to CPU int8.",
+                        "CUDA OOM loading %s model, falling back to %s on CPU int8.",
                         self._model_size,
+                        cpu_model,
                     )
+                    self._model_size = cpu_model
                     self._device = "cpu"
                     self._compute_type = "int8"
                     self._model = WhisperModel(
-                        self._model_size,
+                        cpu_model,
                         device="cpu",
                         compute_type="int8",
                     )

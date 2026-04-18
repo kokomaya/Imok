@@ -6,7 +6,7 @@
 设计决策：
 - 音频采集在后台线程运行（AudioSource.read_chunk 是阻塞的）
 - VAD 在同一后台线程中处理（避免跨线程传递大量音频数据）
-- ASR 在线程池中执行（CPU 密集型，避免阻塞事件循环）
+- ASR 在独立消费者任务中执行（通过 Queue 解耦，不阻塞音频采集）
 - 通过回调机制通知下游消费者（解耦 Pipeline 与 WebSocket/UI）
 """
 
@@ -61,10 +61,11 @@ _HALLUCINATION_PHRASES: frozenset[str] = frozenset(
 )
 
 # 高 no_speech_prob 表示 Whisper 自己也认为这段没有语音
-_NO_SPEECH_PROB_THRESHOLD = 0.6
+# 注意：系统音频（loopback）经常有较高的 no_speech_prob，阈值不宜太低
+_NO_SPEECH_PROB_THRESHOLD = 0.8
 
 # 低 avg_logprob 表示模型对自己的输出不自信
-_LOW_CONFIDENCE_LOGPROB = -1.0
+_LOW_CONFIDENCE_LOGPROB = -1.5
 
 
 def _is_hallucination(result: TranscriptionResult) -> bool:
@@ -89,7 +90,7 @@ def _is_hallucination(result: TranscriptionResult) -> bool:
             return True
 
         # 极低置信度 + 非常短的文本 → 大概率是幻觉
-        if avg_logprob < _LOW_CONFIDENCE_LOGPROB and len(text) < 30:
+        if avg_logprob < _LOW_CONFIDENCE_LOGPROB and len(text) < 15:
             logger.debug(
                 "Filtered low-confidence short text (logprob=%.2f): '%s'",
                 avg_logprob, text[:60],
@@ -127,18 +128,24 @@ class TranscriptionEvent:
 TranscriptionCallback = Callable[[TranscriptionEvent], None]
 
 
+# ASR 段落队列最大深度 — 防止内存无限增长；超出时丢弃最旧段
+_MAX_ASR_QUEUE = 20
+
+# 队列丢弃时的日志间隔（秒），避免日志风暴
+_DROP_LOG_INTERVAL = 5.0
+
+
 class MeetingPipeline:
     """会议核心流水线 — 音频采集 → VAD → ASR。
 
-    使用方式：
-        pipeline = MeetingPipeline(audio_source, vad, asr)
-        pipeline.on_transcription(lambda event: print(event.result.text))
-        await pipeline.start()
-        # ... 会议进行中 ...
-        await pipeline.stop()
+    架构：
+        audio_loop (Task 1)  → read_chunk → VAD → Queue
+        asr_consumer (Task 2) ← Queue → ASR → callbacks
 
-    依赖倒置（DIP）：仅依赖 AudioSource / VoiceActivityDetector / ASREngine 抽象，
-    不依赖具体的 WASAPI/Mic 或 Whisper 实现。
+    音频采集和 ASR 完全解耦：即使 ASR 处理缓慢，音频也能持续采集，
+    不会因 ASR 阻塞而丢失操作系统音频缓冲区的数据。
+
+    依赖倒置（DIP）：仅依赖 AudioSource / VoiceActivityDetector / ASREngine 抽象。
     """
 
     def __init__(
@@ -160,6 +167,10 @@ class MeetingPipeline:
         self._state = PipelineState.IDLE
         self._stop_event = asyncio.Event()
         self._audio_task: Optional[asyncio.Task] = None
+        self._asr_task: Optional[asyncio.Task] = None
+        self._segment_queue: asyncio.Queue[Optional[AudioSegment]] = asyncio.Queue(
+            maxsize=_MAX_ASR_QUEUE
+        )
         self._asr_executor = ThreadPoolExecutor(
             max_workers=max_asr_workers,
             thread_name_prefix="asr-worker",
@@ -168,6 +179,7 @@ class MeetingPipeline:
         # 统计信息
         self._segments_processed = 0
         self._total_audio_duration = 0.0
+        self._segments_dropped = 0
 
     def on_transcription(self, callback: TranscriptionCallback) -> None:
         """注册转写结果回调。可注册多个，按添加顺序调用。"""
@@ -186,6 +198,14 @@ class MeetingPipeline:
         self._stop_event.clear()
         self._segments_processed = 0
         self._total_audio_duration = 0.0
+        self._segments_dropped = 0
+
+        # 重建队列（防止残留 sentinel）
+        self._segment_queue = asyncio.Queue(maxsize=_MAX_ASR_QUEUE)
+
+        # 重置 ASR 语言缓存（新会议可能切换语言）
+        if hasattr(self._asr, "reset_language_cache"):
+            self._asr.reset_language_cache()
 
         try:
             self._audio_source.start()
@@ -196,6 +216,7 @@ class MeetingPipeline:
 
         self._state = PipelineState.RUNNING
         self._audio_task = asyncio.create_task(self._audio_loop())
+        self._asr_task = asyncio.create_task(self._asr_consumer())
         logger.info("MeetingPipeline started.")
 
     async def stop(self) -> None:
@@ -226,11 +247,21 @@ class MeetingPipeline:
         # 刷出 VAD 残余语音段
         await self._flush_vad()
 
+        # 发送 sentinel 通知 ASR 消费者退出，然后等待
+        await self._segment_queue.put(None)
+        if self._asr_task and not self._asr_task.done():
+            try:
+                await asyncio.wait_for(self._asr_task, timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.warning("ASR consumer did not stop in time, cancelling.")
+                self._asr_task.cancel()
+
         self._state = PipelineState.IDLE
         logger.info(
-            "MeetingPipeline stopped. Processed %d segments, %.1fs total audio.",
+            "MeetingPipeline stopped. Processed %d segments (%.1fs audio), dropped %d.",
             self._segments_processed,
             self._total_audio_duration,
+            self._segments_dropped,
         )
 
     @property
@@ -242,7 +273,10 @@ class MeetingPipeline:
         return self._segments_processed
 
     async def _audio_loop(self) -> None:
-        """后台音频读取循环 — 在线程中读取音频，在事件循环中处理 VAD/ASR。"""
+        """后台音频读取循环 — 读取音频 → VAD → 将段落送入队列。
+
+        此循环绝不等待 ASR，保证音频持续采集不中断。
+        """
         loop = asyncio.get_running_loop()
 
         while not self._stop_event.is_set():
@@ -253,18 +287,27 @@ class MeetingPipeline:
                 )
 
                 if chunk is None:
-                    # 无数据，短暂等待后重试
                     await asyncio.sleep(0.01)
                     continue
 
-                # VAD 处理（在线程中执行以避免阻塞事件循环）
+                # VAD 处理
                 segments = await loop.run_in_executor(
                     None, self._vad.feed, chunk.data
                 )
 
-                # 对每个检测到的语音段执行 ASR
+                # 将语音段送入队列（非阻塞），队列满则丢弃最旧段
                 for segment in segments:
-                    await self._process_segment(segment)
+                    if self._segment_queue.full():
+                        try:
+                            self._segment_queue.get_nowait()
+                            self._segments_dropped += 1
+                            logger.warning(
+                                "ASR queue full, dropped oldest segment (total dropped: %d)",
+                                self._segments_dropped,
+                            )
+                        except asyncio.QueueEmpty:
+                            pass
+                    await self._segment_queue.put(segment)
 
             except asyncio.CancelledError:
                 break
@@ -273,6 +316,25 @@ class MeetingPipeline:
                     break
                 logger.exception("Error in audio loop, retrying...")
                 await asyncio.sleep(0.5)
+
+    async def _asr_consumer(self) -> None:
+        """ASR 消费者任务 — 从队列取段落，执行 ASR + 说话人识别。
+
+        独立于音频采集循环运行，保证音频不因 ASR 延迟而丢失。
+        """
+        while True:
+            try:
+                segment = await self._segment_queue.get()
+
+                # None 是 sentinel，表示停止
+                if segment is None:
+                    break
+
+                await self._process_segment(segment)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Error in ASR consumer.")
 
     async def _flush_vad(self) -> None:
         """停止时刷出 VAD 中残余的语音段。"""
@@ -287,6 +349,8 @@ class MeetingPipeline:
     async def _process_segment(self, segment: AudioSegment) -> None:
         """对单个语音段执行 ASR 并通知回调。"""
         loop = asyncio.get_running_loop()
+        t_start = time.monotonic()
+        queue_depth = self._segment_queue.qsize()
 
         try:
             # ASR 在线程池中执行（CPU 密集型）
@@ -296,25 +360,33 @@ class MeetingPipeline:
                 segment.audio_data,
             )
 
+            t_asr = time.monotonic() - t_start
             self._segments_processed += 1
             self._total_audio_duration += segment.duration_s
 
             if result.is_empty:
                 logger.debug(
-                    "ASR returned empty for segment %.2f-%.2f s",
-                    segment.start_time,
-                    segment.end_time,
+                    "ASR empty [%.2fs audio, %.2fs proc, queue=%d] seg %.2f-%.2f",
+                    segment.duration_s, t_asr, queue_depth,
+                    segment.start_time, segment.end_time,
                 )
                 return
 
             # 过滤 Whisper 幻觉输出
             if _is_hallucination(result):
                 logger.info(
-                    "Filtered hallucination in segment %.2f-%.2f s: '%s'",
-                    segment.start_time, segment.end_time,
-                    result.text.strip()[:60],
+                    "Filtered hallucination [%.2fs proc, queue=%d]: '%s'",
+                    t_asr, queue_depth, result.text.strip()[:60],
                 )
                 return
+
+            logger.info(
+                "ASR OK [%.2fs audio → %.2fs proc, RTF=%.2f, queue=%d, lang=%s]: '%s'",
+                segment.duration_s, t_asr,
+                t_asr / max(segment.duration_s, 0.01),
+                queue_depth, result.language,
+                result.text.strip()[:80],
+            )
 
             # 说话人识别（可选）
             speaker = ""

@@ -77,7 +77,7 @@ class ASRSettings(BaseSettings):
         default=None,
         description="识别语言，None 为自动检测（支持中英混合）",
     )
-    beam_size: int = Field(default=3, description="Beam search 宽度")
+    beam_size: int = Field(default=1, description="Beam search 宽度（1=贪心解码，更快）")
     vad_threshold: float = Field(default=0.5, description="VAD 置信度阈值")
     vad_min_silence_ms: int = Field(default=300, description="最小静音间隔 (ms)")
     vad_max_segment_s: float = Field(default=15.0, description="最大语音段时长 (s)")

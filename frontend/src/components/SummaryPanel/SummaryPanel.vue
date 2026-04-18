@@ -234,9 +234,14 @@ async function triggerSegmentSummary() {
     return;
   }
   if (!window.electronAPI) return;
+
+  // 优先走后端 coordinator；Python 未运行时降级为前端直接调用 LLM
   triggeringSegment.value = true;
   try {
-    await window.electronAPI.sendControl('trigger_segment_summary');
+    const resp = await window.electronAPI.sendControl('trigger_segment_summary');
+    if (resp?.ok) return;
+    // 后端不可用，用前端 LLM 降级
+    await generateLiveSegmentSummary();
   } finally {
     triggeringSegment.value = false;
   }
@@ -252,11 +257,87 @@ async function triggerGlobalSummary() {
     return;
   }
   if (!window.electronAPI) return;
+
+  // 全局摘要本质是合并已有段落 — 优先后端，不可用时前端处理
   triggeringGlobal.value = true;
   try {
-    await window.electronAPI.sendControl('trigger_global_summary');
+    const resp = await window.electronAPI.sendControl('trigger_global_summary');
+    if (resp?.ok) return;
+    await generateLiveGlobalSummary();
   } finally {
     triggeringGlobal.value = false;
+  }
+}
+
+/**
+ * 前端降级：用 liveTranscriptions 直接调用 LLM 生成段落摘要。
+ */
+async function generateLiveSegmentSummary() {
+  const trans = summaryStore.state.liveTranscriptions;
+  if (!trans.length || !window.electronAPI?.llmChat) return;
+
+  const textBlock = trans.map((t) => t.text).join('\n');
+  if (!textBlock.trim()) return;
+
+  const result = await window.electronAPI.llmChat({
+    messages: [
+      { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
+      { role: 'user', content: `请对以下会议内容进行摘要：\n\n${textBlock}` },
+    ],
+    temperature: 0.3,
+    max_tokens: 1024,
+  });
+
+  if (result.ok && result.content) {
+    const parsed = parseSummaryResponse(result.content);
+    summaryStore.addSegmentSummary({
+      time_range: '完整会议',
+      topics: parsed.topics,
+      conclusions: parsed.conclusions,
+      action_items: parsed.action_items,
+      raw_text: result.content,
+    });
+  } else {
+    console.error('[SummaryPanel] Fallback LLM error:', result.error);
+  }
+}
+
+/**
+ * 前端降级：合并已有段落摘要为全局总结。
+ */
+async function generateLiveGlobalSummary() {
+  // 如果没有段落摘要但有转写文本，先生成段落摘要
+  if (summaryStore.state.segments.length === 0 && summaryStore.state.liveTranscriptions.length > 0) {
+    await generateLiveSegmentSummary();
+  }
+  if (summaryStore.state.segments.length === 0) return;
+  if (!window.electronAPI?.llmChat) return;
+
+  const segTexts = summaryStore.state.segments.map((s) => s.rawText).join('\n\n---\n\n');
+  const result = await window.electronAPI.llmChat({
+    messages: [
+      { role: 'system', content: MERGE_SYSTEM_PROMPT },
+      { role: 'user', content: `请将以下段落摘要合并为一份全局会议总结：\n\n${segTexts}` },
+    ],
+    temperature: 0.3,
+    max_tokens: 1500,
+  });
+
+  if (result.ok && result.content) {
+    const parsed = parseSummaryResponse(result.content);
+    summaryStore.updateGlobalSummary({
+      raw_text: result.content,
+      segments_merged: summaryStore.state.segments.length,
+      merge_count: 1,
+      action_items: parsed.action_items.map((item) => {
+        const colonIdx = item.indexOf('：') !== -1 ? item.indexOf('：') : item.indexOf(':');
+        const assignee = colonIdx > 0 ? item.slice(0, colonIdx).trim() : '';
+        const desc = colonIdx > 0 ? item.slice(colonIdx + 1).trim() : item;
+        return { description: desc, assignee, deadline: '', status: 'open' };
+      }),
+    });
+  } else {
+    console.error('[SummaryPanel] Fallback LLM merge error:', result.error);
   }
 }
 

@@ -151,6 +151,11 @@ onMounted(async () => {
         speaker: data.speaker || '',
         timestamp: new Date().toLocaleTimeString(),
       });
+      // 同步到 summaryStore 供前端降级生成摘要使用
+      summaryStore.addLiveTranscription({
+        text: data.text,
+        timestamp: Date.now() / 1000,
+      });
     }),
   );
 
