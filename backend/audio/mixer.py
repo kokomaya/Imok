@@ -53,6 +53,9 @@ class AudioMixer(AudioSource):
         self._start_time = 0.0
         self._lock = threading.Lock()
 
+        # 每个源的最新 RMS 电平 (0.0~1.0)
+        self._levels: Dict[str, float] = {}
+
     def add_source(self, name: str, source: AudioSource) -> None:
         """添加一个音频源。必须在 start() 之前调用。"""
         if self._active:
@@ -191,6 +194,9 @@ class AudioMixer(AudioSource):
                 chunk = source.read_chunk()
                 if chunk is None:
                     continue
+                # 计算该源的 RMS 电平
+                rms = float(np.sqrt(np.mean(chunk.data ** 2)))
+                self._levels[name] = rms
                 try:
                     self._queues[name].put_nowait(chunk.data)
                 except queue.Full:
@@ -205,3 +211,7 @@ class AudioMixer(AudioSource):
                     logger.exception("Error reading from source %s", name)
                 break
         logger.debug("Mixer reader stopped for source: %s", name)
+
+    def get_levels(self) -> Dict[str, float]:
+        """返回每个源的最新 RMS 电平 (0.0~1.0)。"""
+        return dict(self._levels)

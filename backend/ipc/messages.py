@@ -27,6 +27,7 @@ class MessageType(str, Enum):
     ERROR = "error"  # 错误通知
     SEGMENT_SUMMARY = "segment_summary"  # 段落摘要
     GLOBAL_SUMMARY = "global_summary"  # 全局会议总结
+    AUDIO_LEVEL = "audio_level"  # 实时音频电平
 
     # Electron → Python (stdin)
     CONTROL = "control"  # 控制命令
@@ -257,3 +258,8 @@ class IPCMessage:
             action_items=action_items or [],
         )
         return cls(type=MessageType.GLOBAL_SUMMARY, data=asdict(data))
+
+    @classmethod
+    def audio_level(cls, levels: Dict[str, float]) -> "IPCMessage":
+        """创建音频电平消息。levels: {source_name: rms_value}"""
+        return cls(type=MessageType.AUDIO_LEVEL, data={"levels": levels})

@@ -249,6 +249,9 @@ class PythonBridge extends EventEmitter {
       case 'global_summary':
         this.emit('global-summary', data);
         break;
+      case 'audio_level':
+        this.emit('audio-level', data);
+        break;
       default:
         this.emit('message', message);
     }

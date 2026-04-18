@@ -4,6 +4,7 @@ import { useHashRoute } from '@/router.js';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { MuteAssistPanel } from '@/components/MuteAssistPanel';
 import { SummaryPanel } from '@/components/SummaryPanel';
+import { AudioDevicePanel } from '@/components/AudioDevicePanel';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
 import { summaryStore } from '@/stores/summary-store.js';
 import { expressionService } from '@/services/expression-service.js';
@@ -36,6 +37,7 @@ function dismissError() {
 
 // ── 会议历史 ──
 const historyVisible = ref(false);
+const devicePanelVisible = ref(false);
 const historyMeetings = ref([]);
 const historyLoading = ref(false);
 const loadedMeetingId = ref(null);
@@ -169,6 +171,9 @@ function handleMenuAction(action, data) {
       break;
     case 'device-changed':
       // 设备已在 main.js 侧更新，仅做 UI 反馈
+      break;
+    case 'toggle-device-panel':
+      devicePanelVisible.value = !devicePanelVisible.value;
       break;
   }
 }
@@ -504,6 +509,13 @@ function formatDuration(start, end) {
           🎤
         </label>
 
+        <button
+          class="btn-icon"
+          :class="{ active: devicePanelVisible }"
+          @click="devicePanelVisible = !devicePanelVisible"
+          title="音频设备监控"
+        >🎛</button>
+
         <span class="header-sep"></span>
 
         <!-- 功能按钮 -->
@@ -569,6 +581,12 @@ function formatDuration(start, end) {
         </div>
       </div>
     </div>
+
+    <!-- 音频设备监控面板 -->
+    <AudioDevicePanel
+      :visible="devicePanelVisible"
+      @close="devicePanelVisible = false"
+    />
 
     <main class="content">
       <!-- 会议摘要面板 -->

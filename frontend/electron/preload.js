@@ -47,6 +47,7 @@ const RECEIVE_CHANNELS = [
   'python:bridge-error',
   'python:segment-summary',
   'python:global-summary',
+  'python:audio-level',
   'mute-panel:toggle',
   'menu:action',
 ];

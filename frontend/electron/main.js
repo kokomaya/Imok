@@ -550,6 +550,10 @@ function initPythonBridge() {
     broadcast('python:global-summary', data);
   });
 
+  pythonBridge.on('audio-level', (data) => {
+    mainWindow?.webContents.send('python:audio-level', data);
+  });
+
   pythonBridge.on('log', (text) => {
     if (IS_DEV) {
       console.log('[Python]', text);
@@ -654,6 +658,12 @@ function buildAppMenu() {
         {
           label: '🔍 刷新设备列表',
           click: () => { cachedDevices = null; refreshDeviceMenu(); },
+        },
+        { type: 'separator' },
+        {
+          label: '🎛 音频设备监控面板',
+          accelerator: 'CmdOrCtrl+Shift+D',
+          click: () => send('toggle-device-panel'),
         },
       ],
     },

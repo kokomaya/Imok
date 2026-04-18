@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, List, Optional
 
+import numpy as np
+
 from backend.asr.base import ASREngine, TranscriptionResult
 from backend.asr.vad import AudioSegment, VoiceActivityDetector
 from backend.audio.base import AudioChunk, AudioSource
@@ -164,6 +166,7 @@ class MeetingPipeline:
         self._speaker_tracker = speaker_tracker
 
         self._callbacks: List[TranscriptionCallback] = []
+        self._level_callbacks: List[Callable] = []
         self._state = PipelineState.IDLE
         self._stop_event = asyncio.Event()
         self._audio_task: Optional[asyncio.Task] = None
@@ -180,10 +183,15 @@ class MeetingPipeline:
         self._segments_processed = 0
         self._total_audio_duration = 0.0
         self._segments_dropped = 0
+        self._last_level_ts = 0.0
 
     def on_transcription(self, callback: TranscriptionCallback) -> None:
         """注册转写结果回调。可注册多个，按添加顺序调用。"""
         self._callbacks.append(callback)
+
+    def on_audio_level(self, callback: Callable) -> None:
+        """注册音频电平回调。callback(levels: dict[str, float])"""
+        self._level_callbacks.append(callback)
 
     async def start(self) -> None:
         """启动流水线 — 开始音频采集和识别循环。
@@ -289,6 +297,21 @@ class MeetingPipeline:
                 if chunk is None:
                     await asyncio.sleep(0.01)
                     continue
+
+                # 定期发送音频电平 (~5Hz)
+                now = time.monotonic()
+                if self._level_callbacks and now - self._last_level_ts > 0.2:
+                    self._last_level_ts = now
+                    if hasattr(self._audio_source, 'get_levels'):
+                        levels = self._audio_source.get_levels()
+                    else:
+                        rms = float(np.sqrt(np.mean(chunk.data ** 2)))
+                        levels = {'main': rms}
+                    for cb in self._level_callbacks:
+                        try:
+                            cb(levels)
+                        except Exception:
+                            logger.debug("Error in level callback", exc_info=True)
 
                 # VAD 处理
                 segments = await loop.run_in_executor(

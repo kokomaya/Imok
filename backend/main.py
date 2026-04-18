@@ -447,6 +447,12 @@ async def _run_subprocess(source_type: str) -> None:
             )
             pl.on_transcription(_on_transcription)
 
+            # 注册音频电平回调 → IPC 实时推送
+            def _on_audio_level(levels):
+                writer.write(IPCMessage.audio_level(levels))
+
+            pl.on_audio_level(_on_audio_level)
+
             # 初始化存储（创建会议文件夹）
             try:
                 meeting_id = meeting_store.create_meeting(
