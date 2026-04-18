@@ -64,6 +64,9 @@ const state = reactive({
 
   /** 当前回看的会议 ID */
   reviewMeetingId: '',
+
+  /** 当前实时会议 ID（由 App.vue 根据 python:status 设置） */
+  liveMeetingId: '',
 });
 
 // ── 脏检测 ──
@@ -97,6 +100,11 @@ function markSaved() {
  */
 const hasSummaryContent = computed(() => {
   return state.segments.length > 0 || state.globalSummary !== null;
+});
+
+/** 当前可保存的会议 ID（回看模式用 reviewMeetingId，实时模式用 liveMeetingId） */
+const activeMeetingId = computed(() => {
+  return state.reviewMeetingId || state.liveMeetingId;
 });
 
 /**
@@ -151,6 +159,7 @@ function clearAll() {
   state.globalSummary = null;
   state.reviewMode = false;
   state.reviewMeetingId = '';
+  state.liveMeetingId = '';
   state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length);
   _savedHash = '';
 }
@@ -172,6 +181,14 @@ function setReviewData(transcriptions, meetingId = '') {
 function clearReviewData() {
   state.reviewMode = false;
   state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length);
+}
+
+/**
+ * 设置当前实时会议 ID。
+ * @param {string} meetingId
+ */
+function setLiveMeetingId(meetingId) {
+  state.liveMeetingId = meetingId;
 }
 
 /** 所有主题（从所有段落摘要合并去重） */
@@ -247,12 +264,14 @@ export const summaryStore = {
   actionItems,
   isDirty,
   hasSummaryContent,
+  activeMeetingId,
   addSegmentSummary,
   updateGlobalSummary,
   clearAll,
   toggleVisible,
   setReviewData,
   clearReviewData,
+  setLiveMeetingId,
   markSaved,
   getSummariesForSave,
 };

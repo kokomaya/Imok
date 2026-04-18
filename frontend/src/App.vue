@@ -111,9 +111,30 @@ onMounted(async () => {
   }
 
   cleanupFns.push(
-    window.electronAPI.on('python:status', (data) => {
+    window.electronAPI.on('python:status', async (data) => {
+      const prevActive = meetingActive.value;
       status.value = data.state || 'unknown';
       meetingActive.value = data.state === 'running';
+
+      // 会议启动 → 记录 meeting_id 到 summaryStore
+      if (data.state === 'running' && data.meeting_id) {
+        summaryStore.setLiveMeetingId(data.meeting_id);
+      }
+
+      // 会议停止 → 自动保存前端摘要到该会议
+      if (data.state === 'stopped' && prevActive) {
+        const mid = data.meeting_id || summaryStore.state.liveMeetingId;
+        if (mid && summaryStore.hasSummaryContent.value && window.electronAPI?.saveMeetingSummaries) {
+          try {
+            const saveData = summaryStore.getSummariesForSave();
+            await window.electronAPI.saveMeetingSummaries(mid, saveData);
+            summaryStore.markSaved();
+          } catch (err) {
+            console.error('[App] Auto-save summaries failed:', err);
+          }
+        }
+        summaryStore.setLiveMeetingId('');
+      }
     }),
   );
 
@@ -172,7 +193,7 @@ onUnmounted(() => {
 });
 
 function onBeforeUnload(e) {
-  if (summaryStore.isDirty.value && summaryStore.state.reviewMeetingId) {
+  if (summaryStore.isDirty.value && summaryStore.activeMeetingId.value) {
     e.preventDefault();
     e.returnValue = '';
   }
@@ -191,14 +212,14 @@ function openOverlay() {
  * @returns {Promise<boolean>} true = 可以继续操作，false = 用户取消
  */
 async function checkUnsavedSummary() {
-  if (!summaryStore.isDirty.value || !summaryStore.state.reviewMeetingId) return true;
+  const meetingId = summaryStore.activeMeetingId.value;
+  if (!summaryStore.isDirty.value || !meetingId) return true;
 
   const action = window.confirm(
     '当前摘要有未保存的修改，是否保存？\n\n点击"确定"保存后继续，点击"取消"放弃修改。',
   );
   if (action) {
     // 保存
-    const meetingId = summaryStore.state.reviewMeetingId;
     if (window.electronAPI?.saveMeetingSummaries) {
       const data = summaryStore.getSummariesForSave();
       const result = await window.electronAPI.saveMeetingSummaries(meetingId, data);

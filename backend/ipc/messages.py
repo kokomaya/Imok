@@ -75,6 +75,7 @@ class StatusData:
     source: str = ""  # 当前音频源
     asr_model: str = ""  # 当前 ASR 模型
     message: str = ""  # 附加信息
+    meeting_id: str = ""  # 当前会议 ID（RUNNING/STOPPED 时携带）
 
 
 @dataclass
@@ -194,6 +195,7 @@ class IPCMessage:
         source: str = "",
         asr_model: str = "",
         message: str = "",
+        meeting_id: str = "",
     ) -> "IPCMessage":
         """创建状态消息。"""
         data = StatusData(
@@ -201,6 +203,7 @@ class IPCMessage:
             source=source,
             asr_model=asr_model,
             message=message,
+            meeting_id=meeting_id,
         )
         return cls(type=MessageType.STATUS, data=asdict(data))
 

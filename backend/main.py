@@ -469,6 +469,7 @@ async def _run_subprocess(source_type: str) -> None:
                     ProcessState.RUNNING,
                     source=src_type,
                     asr_model=asr._settings.model_size if hasattr(asr, "_settings") else "",
+                    meeting_id=meeting_id or "",
                 )
             )
             return pl
@@ -497,7 +498,10 @@ async def _run_subprocess(source_type: str) -> None:
         if pipeline is not None:
             await pipeline.stop()
             pipeline = None
-            writer.write(IPCMessage.status(ProcessState.STOPPED))
+
+        # 发送 STOPPED 状态（携带 meeting_id 供前端保存摘要）
+        stopped_meeting_id = meeting_id or ""
+        writer.write(IPCMessage.status(ProcessState.STOPPED, meeting_id=stopped_meeting_id))
 
         # 持久化说话人跟踪状态
         if speaker_tracker is not None and meeting_id is not None:

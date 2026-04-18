@@ -197,7 +197,7 @@ function confirmOverwrite(type) {
 // ── 保存摘要 ──
 
 async function saveSummaries() {
-  const meetingId = summaryStore.state.reviewMeetingId;
+  const meetingId = summaryStore.activeMeetingId.value;
   if (!meetingId || !window.electronAPI?.saveMeetingSummaries) return;
   saving.value = true;
   try {
@@ -348,7 +348,7 @@ function formatUpdatedTime(segment) {
         <span class="panel-title">📋 会议摘要</span>
         <span v-if="summaryStore.isDirty.value" class="dirty-dot" title="摘要有未保存的修改">●</span>
         <button
-          v-if="summaryStore.state.reviewMeetingId && summaryStore.hasSummaryContent.value"
+          v-if="summaryStore.activeMeetingId.value && summaryStore.hasSummaryContent.value"
           class="save-btn"
           :class="{ dirty: summaryStore.isDirty.value }"
           :disabled="saving || !summaryStore.isDirty.value"
