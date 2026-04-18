@@ -46,6 +46,7 @@ const RECEIVE_CHANNELS = [
   'python:segment-summary',
   'python:global-summary',
   'mute-panel:toggle',
+  'menu:action',
 ];
 
 // ---------------------------------------------------------------
@@ -211,5 +212,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     if (RECEIVE_CHANNELS.includes(channel)) {
       ipcRenderer.removeAllListeners(channel);
     }
+  },
+
+  /**
+   * 同步音频开关状态到主进程菜单勾选。
+   * @param {{ systemAudio: boolean, mic: boolean }} state
+   */
+  syncAudioState: (state) => {
+    ipcRenderer.send('menu:audio-state', state);
   },
 });

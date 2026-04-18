@@ -8,7 +8,7 @@
  * 生产模式：加载打包后的 dist/index.html
  */
 
-const { app, BrowserWindow, ipcMain, globalShortcut, session } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, globalShortcut, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { PythonBridge } = require('./python-bridge');
@@ -139,6 +139,11 @@ function setupIPC() {
   ipcMain.handle('mute-panel:toggle', () => {
     mainWindow?.webContents.send('mute-panel:toggle');
     return { ok: true };
+  });
+
+  // 音频开关状态同步：renderer → main menu checkmarks
+  ipcMain.on('menu:audio-state', (_event, state) => {
+    updateAudioMenuChecks(state);
   });
 
   // LLM 配置：读取 llm_providers.yaml + .env → 返回给 renderer
@@ -519,6 +524,109 @@ function initPythonBridge() {
 }
 
 // ---------------------------------------------------------------
+// 应用菜单
+// ---------------------------------------------------------------
+
+/**
+ * 构建应用菜单 — 菜单项与工具栏功能一一对应。
+ * 菜单通过 IPC 发送 'menu:action' 事件到渲染进程，由 App.vue 统一处理。
+ */
+function buildAppMenu() {
+  const send = (action) => {
+    mainWindow?.webContents.send('menu:action', action);
+  };
+
+  const template = [
+    {
+      label: '会议',
+      submenu: [
+        {
+          label: '开始会议',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: () => send('start-meeting'),
+        },
+        {
+          label: '停止会议',
+          accelerator: 'CmdOrCtrl+Shift+X',
+          click: () => send('stop-meeting'),
+        },
+        { type: 'separator' },
+        {
+          label: '历史会议记录',
+          accelerator: 'CmdOrCtrl+H',
+          click: () => send('toggle-history'),
+        },
+        { type: 'separator' },
+        { role: 'quit', label: '退出' },
+      ],
+    },
+    {
+      label: '音频',
+      submenu: [
+        {
+          label: '系统音频 (Teams/Zoom)',
+          type: 'checkbox',
+          checked: true,
+          id: 'system-audio',
+          click: (item) => send(item.checked ? 'enable-system-audio' : 'disable-system-audio'),
+        },
+        {
+          label: '麦克风',
+          type: 'checkbox',
+          checked: true,
+          id: 'mic-audio',
+          click: (item) => send(item.checked ? 'enable-mic' : 'disable-mic'),
+        },
+      ],
+    },
+    {
+      label: '视图',
+      submenu: [
+        {
+          label: '悬浮字幕',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => send('open-overlay'),
+        },
+        {
+          label: '闭麦表达助手',
+          accelerator: 'CmdOrCtrl+Shift+M',
+          click: () => send('toggle-mute-assist'),
+        },
+        {
+          label: '会议摘要面板',
+          accelerator: 'CmdOrCtrl+Shift+P',
+          click: () => send('toggle-summary'),
+        },
+        { type: 'separator' },
+        {
+          label: '清空转写记录',
+          click: () => send('clear-transcriptions'),
+        },
+        { type: 'separator' },
+        { role: 'toggleDevTools', label: '开发者工具' },
+        { role: 'reload', label: '重新加载' },
+      ],
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
+/**
+ * 从渲染进程同步音频开关状态到菜单勾选。
+ * @param {{ systemAudio: boolean, mic: boolean }} state
+ */
+function updateAudioMenuChecks(state) {
+  const menu = Menu.getApplicationMenu();
+  if (!menu) return;
+  const sysItem = menu.getMenuItemById('system-audio');
+  const micItem = menu.getMenuItemById('mic-audio');
+  if (sysItem) sysItem.checked = state.systemAudio;
+  if (micItem) micItem.checked = state.mic;
+}
+
+// ---------------------------------------------------------------
 // 全局快捷键
 // ---------------------------------------------------------------
 
@@ -571,6 +679,7 @@ function setupSSLOverride() {
 app.whenReady().then(() => {
   setupIPC();
   createMainWindow();
+  buildAppMenu();
   setupSSLOverride();
   initPythonBridge();
   registerShortcuts();

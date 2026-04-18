@@ -94,14 +94,74 @@ async function stopMeeting() {
  * 音频源开关变化时，如果会议正在进行，重新配置。
  */
 async function onAudioToggle() {
-  if (!meetingActive.value) return;
+  if (!meetingActive.value) {
+    syncAudioStateToMenu();
+    return;
+  }
   if (!systemAudioEnabled.value && !micEnabled.value) {
     showError('至少需要一个音频源，已自动恢复系统音频');
     systemAudioEnabled.value = true;
+    syncAudioStateToMenu();
     return;
   }
   const source = getSourceType();
   await window.electronAPI.sendControl('switch_source', { source });
+  syncAudioStateToMenu();
+}
+
+// ── 菜单栏 ↔ 工具栏同步 ──
+
+function syncAudioStateToMenu() {
+  window.electronAPI?.syncAudioState?.({
+    systemAudio: systemAudioEnabled.value,
+    mic: micEnabled.value,
+  });
+}
+
+function handleMenuAction(action) {
+  switch (action) {
+    case 'start-meeting':
+      startMeeting();
+      break;
+    case 'stop-meeting':
+      stopMeeting();
+      break;
+    case 'toggle-history':
+      toggleHistory();
+      break;
+    case 'enable-system-audio':
+      systemAudioEnabled.value = true;
+      onAudioToggle();
+      syncAudioStateToMenu();
+      break;
+    case 'disable-system-audio':
+      systemAudioEnabled.value = false;
+      onAudioToggle();
+      syncAudioStateToMenu();
+      break;
+    case 'enable-mic':
+      micEnabled.value = true;
+      onAudioToggle();
+      syncAudioStateToMenu();
+      break;
+    case 'disable-mic':
+      micEnabled.value = false;
+      onAudioToggle();
+      syncAudioStateToMenu();
+      break;
+    case 'open-overlay':
+      openOverlay();
+      break;
+    case 'toggle-mute-assist':
+      muteAssistStore.toggleVisible();
+      break;
+    case 'toggle-summary':
+      summaryStore.toggleVisible();
+      break;
+    case 'clear-transcriptions':
+      clearTranscriptions();
+      break;
+  }
 }
 
 onMounted(async () => {
@@ -183,6 +243,16 @@ onMounted(async () => {
       muteAssistStore.toggleVisible();
     }),
   );
+
+  // 菜单栏操作 → 复用工具栏逻辑
+  cleanupFns.push(
+    window.electronAPI.on('menu:action', (action) => {
+      handleMenuAction(action);
+    }),
+  );
+
+  // 同步初始音频开关状态到菜单
+  syncAudioStateToMenu();
 
   // 初始化 LLM 配置 → 表达服务
   try {
