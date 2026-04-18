@@ -223,6 +223,7 @@ onMounted(async () => {
         text: data.text,
         language: data.language || '',
         speaker: data.speaker || '',
+        source: data.source || '',
         timestamp: new Date().toLocaleTimeString(),
       });
       // 同步到 summaryStore 供前端降级生成摘要使用
@@ -371,6 +372,7 @@ async function loadMeeting(meetingId) {
       text: t.text,
       language: t.language || '',
       speaker: t.speaker || '',
+      source: t.source || '',
       timestamp: t.timestamp
         ? new Date(t.timestamp * 1000).toLocaleTimeString()
         : '',
@@ -617,6 +619,7 @@ function formatDuration(start, end) {
             class="transcription-item"
           >
             <span class="time">{{ item.timestamp }}</span>
+            <span class="source-icon" v-if="item.source" :title="item.source === 'mic' ? '麦克风' : '系统音频'">{{ item.source === 'mic' ? '🎤' : '🔊' }}</span>
             <span class="speaker" v-if="item.speaker">[{{ item.speaker }}]</span>
             <span class="lang" v-if="item.language">[{{ item.language }}]</span>
             <span
@@ -936,6 +939,12 @@ function formatDuration(start, end) {
   font-size: 11px;
   font-weight: 600;
   flex-shrink: 0;
+}
+
+.source-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+  cursor: default;
 }
 
 .text {

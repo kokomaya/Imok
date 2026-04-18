@@ -38,12 +38,14 @@ class AudioSegment:
         start_time: 相对于 VAD 启动的起始时间 (秒)。
         end_time: 相对于 VAD 启动的结束时间 (秒)。
         duration_s: 时长 (秒)，自动计算。
+        source_name: 产生此段落的音频源名称（如 "wasapi"、"mic"）。
     """
 
     audio_data: np.ndarray
     sample_rate: int
     start_time: float
     end_time: float
+    source_name: str = ""
     duration_s: float = field(init=False)
 
     def __post_init__(self) -> None:

@@ -311,6 +311,7 @@ async def _run_subprocess(source_type: str) -> None:
             segment_start=event.segment_start_time,
             segment_end=event.segment_end_time,
             speaker=event.speaker,
+            source=event.source_name,
         )
         writer.write(msg)
 
@@ -413,17 +414,16 @@ async def _run_subprocess(source_type: str) -> None:
             logger.exception("Failed to store global summary")
 
     async def _start_pipeline(src_type: str) -> MeetingPipeline:
-        """创建并启动 Pipeline + SummaryCoordinator。"""
+        """创建并启动 Pipeline + SummaryCoordinator。
+
+        当 src_type == 'both' 时，为每个音频源创建独立的 VAD 实例，
+        各自独立检测语音，共享同一个 ASR 引擎。
+        """
         nonlocal summary_coordinator, llm_client, meeting_id, speaker_tracker
 
         writer.write(IPCMessage.status(ProcessState.LOADING, message="Loading models..."))
 
         try:
-            audio_src = _create_audio_source(
-                src_type,
-                loopback_device=selected_loopback_device,
-                mic_device=selected_mic_device,
-            )
             vad = _create_vad()
             asr = _create_asr()
             asr.load()
@@ -440,10 +440,42 @@ async def _run_subprocess(source_type: str) -> None:
             except Exception:
                 logger.warning("Speaker diarization unavailable, continuing without.", exc_info=True)
 
+            extra_sources = None
+
+            if src_type == "both":
+                # 多源模式 — 各源独立 VAD，不再混合
+                from backend.audio.wasapi_source import WASAPILoopbackSource
+                from backend.audio.mic_source import MicrophoneSource
+                from backend.config import get_settings
+
+                settings = get_settings()
+                lb_idx = selected_loopback_device if selected_loopback_device is not None else settings.audio.loopback_device
+                mic_idx = selected_mic_device if selected_mic_device is not None else settings.audio.mic_device
+
+                main_source = WASAPILoopbackSource(
+                    target_sample_rate=settings.audio.sample_rate,
+                    chunk_frames=settings.audio.chunk_frames,
+                    device_index=lb_idx,
+                )
+                mic_source = MicrophoneSource(
+                    target_sample_rate=settings.audio.sample_rate,
+                    chunk_frames=settings.audio.chunk_frames,
+                    device_index=mic_idx,
+                )
+                mic_vad = _create_vad()
+                extra_sources = [("mic", mic_source, mic_vad)]
+            else:
+                main_source = _create_audio_source(
+                    src_type,
+                    loopback_device=selected_loopback_device,
+                    mic_device=selected_mic_device,
+                )
+
             pl = MeetingPipeline(
-                audio_src, vad, asr,
+                main_source, vad, asr,
                 speaker_embedder=speaker_embedder,
                 speaker_tracker=speaker_tracker,
+                extra_sources=extra_sources,
             )
             pl.on_transcription(_on_transcription)
 
