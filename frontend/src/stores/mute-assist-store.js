@@ -44,7 +44,7 @@ const state = reactive({
   history: [],
 
   /** 面板是否可见 */
-  visible: true,
+  visible: false,
 
   /** 已复制提示 */
   copied: false,

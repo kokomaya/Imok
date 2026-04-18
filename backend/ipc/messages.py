@@ -62,6 +62,7 @@ class TranscriptionData:
     confidence: float = 0.0
     segment_start: float = 0.0
     segment_end: float = 0.0
+    speaker: str = ""  # 说话人 ID
     timestamp: float = field(default_factory=time.time)
     segments: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -170,6 +171,7 @@ class IPCMessage:
         confidence: float = 0.0,
         segment_start: float = 0.0,
         segment_end: float = 0.0,
+        speaker: str = "",
         segments: Optional[List[Dict[str, Any]]] = None,
     ) -> "IPCMessage":
         """创建转写结果消息。"""
@@ -179,6 +181,7 @@ class IPCMessage:
             confidence=confidence,
             segment_start=segment_start,
             segment_end=segment_end,
+            speaker=speaker,
             segments=segments or [],
         )
         return cls(type=MessageType.TRANSCRIPTION, data=asdict(data))

@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 _META_FILE = "meta.json"
 _TRANSCRIPTIONS_FILE = "transcriptions.jsonl"
 _SUMMARIES_FILE = "summaries.json"
+_SPEAKERS_FILE = "speakers.json"
 
 
 class MeetingStore:
@@ -118,6 +119,19 @@ class MeetingStore:
             self._write_summaries(meeting_id, summaries)
 
     # ── 查询 ──────────────────────────────────────────────────
+
+    def save_speakers(self, meeting_id: str, speaker_data: dict) -> None:
+        """保存说话人识别状态到 speakers.json（线程安全）。"""
+        path = self._meeting_dir(meeting_id) / _SPEAKERS_FILE
+        with self._lock:
+            _write_json(path, speaker_data)
+
+    def load_speakers(self, meeting_id: str) -> dict:
+        """读取说话人识别状态（如果存在）。"""
+        path = self._meeting_dir(meeting_id) / _SPEAKERS_FILE
+        if not path.exists():
+            return {}
+        return _read_json(path)
 
     def load_meeting(self, meeting_id: str) -> MeetingData:
         """读取完整会议数据。"""

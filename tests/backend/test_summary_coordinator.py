@@ -71,6 +71,7 @@ class FakeTranscriptionEvent:
     result: FakeTranscriptionResult
     segment_start_time: float
     segment_end_time: float
+    speaker: str = ""
 
 
 def make_event(text, start, end, lang="zh"):

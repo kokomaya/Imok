@@ -507,11 +507,10 @@ function initPythonBridge() {
     broadcast('python:bridge-error', data);
   });
 
-  // 收到 ready 状态后自动开始音频采集
+  // 收到 ready 状态后通知前端，但不自动开始
   pythonBridge.on('status', (data) => {
     if (data.state === 'ready') {
-      console.log('[PythonBridge] Ready, sending start command...');
-      pythonBridge.sendControl('start');
+      console.log('[PythonBridge] Ready, waiting for user to start meeting.');
     }
   });
 

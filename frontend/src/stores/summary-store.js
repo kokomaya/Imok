@@ -54,7 +54,7 @@ const state = reactive({
   processing: false,
 
   /** 面板是否可见 */
-  visible: true,
+  visible: false,
 
   /** 是否处于历史回看模式 */
   reviewMode: false,

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useHashRoute } from '@/router.js';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { MuteAssistPanel } from '@/components/MuteAssistPanel';
@@ -12,7 +12,27 @@ const { currentRoute } = useHashRoute();
 
 const status = ref('disconnected');
 const transcriptions = ref([]);
-const audioSource = ref('wasapi');
+
+// ── 音频源独立开关 ──
+const systemAudioEnabled = ref(true);
+const micEnabled = ref(true);
+
+// ── 会议控制 ──
+const meetingActive = ref(false);
+
+// ── 错误通知 ──
+const errorMessage = ref('');
+let errorTimer = null;
+
+function showError(msg) {
+  errorMessage.value = msg;
+  if (errorTimer) clearTimeout(errorTimer);
+  errorTimer = setTimeout(() => { errorMessage.value = ''; }, 8000);
+}
+function dismissError() {
+  errorMessage.value = '';
+  if (errorTimer) clearTimeout(errorTimer);
+}
 
 // ── 会议历史 ──
 const historyVisible = ref(false);
@@ -20,13 +40,69 @@ const historyMeetings = ref([]);
 const historyLoading = ref(false);
 const loadedMeetingId = ref(null);
 
+// ── 自动滚动 ──
+const transcriptionListRef = ref(null);
+function scrollToBottom() {
+  nextTick(() => {
+    const el = transcriptionListRef.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
+watch(transcriptions, scrollToBottom, { deep: true });
+
 let cleanupFns = [];
 
+/**
+ * 根据当前音频开关计算 source_type 参数。
+ */
+function getSourceType() {
+  if (systemAudioEnabled.value && micEnabled.value) return 'both';
+  if (systemAudioEnabled.value) return 'wasapi';
+  if (micEnabled.value) return 'mic';
+  return 'wasapi'; // 至少保留一个
+}
+
+/**
+ * 开始会议 — 启动音频采集和 ASR。
+ */
+async function startMeeting() {
+  if (!window.electronAPI || meetingActive.value) return;
+  // 至少启用一个音频源
+  if (!systemAudioEnabled.value && !micEnabled.value) {
+    showError('请至少启用一个音频源（系统音频或麦克风）');
+    return;
+  }
+  const source = getSourceType();
+  // 先切换音频源配置，再启动
+  await window.electronAPI.sendControl('switch_source', { source });
+  await window.electronAPI.sendControl('start');
+}
+
+/**
+ * 停止会议 — 停止采集。
+ */
+async function stopMeeting() {
+  if (!window.electronAPI || !meetingActive.value) return;
+  await window.electronAPI.sendControl('stop');
+}
+
+/**
+ * 音频源开关变化时，如果会议正在进行，重新配置。
+ */
+async function onAudioToggle() {
+  if (!meetingActive.value) return;
+  if (!systemAudioEnabled.value && !micEnabled.value) {
+    showError('至少需要一个音频源，已自动恢复系统音频');
+    systemAudioEnabled.value = true;
+    return;
+  }
+  const source = getSourceType();
+  await window.electronAPI.sendControl('switch_source', { source });
+}
+
 onMounted(async () => {
-  // 主窗口视图才直接监听 IPC（overlay 有独立的 ipc-bridge 服务）
   if (currentRoute.value !== 'main') return;
 
-  // 关闭窗口时检查未保存摘要
   window.addEventListener('beforeunload', onBeforeUnload);
 
   if (!window.electronAPI) {
@@ -37,9 +113,7 @@ onMounted(async () => {
   cleanupFns.push(
     window.electronAPI.on('python:status', (data) => {
       status.value = data.state || 'unknown';
-      if (data.source) {
-        audioSource.value = data.source;
-      }
+      meetingActive.value = data.state === 'running';
     }),
   );
 
@@ -49,6 +123,7 @@ onMounted(async () => {
         id: Date.now(),
         text: data.text,
         language: data.language || '',
+        speaker: data.speaker || '',
         timestamp: new Date().toLocaleTimeString(),
       });
     }),
@@ -57,17 +132,16 @@ onMounted(async () => {
   cleanupFns.push(
     window.electronAPI.on('python:error', (data) => {
       console.error('[Python Error]', data);
+      showError(data.message || data.code || '后端错误');
     }),
   );
 
-  // 段落摘要 → summary store
   cleanupFns.push(
     window.electronAPI.on('python:segment-summary', (data) => {
       summaryStore.addSegmentSummary(data);
     }),
   );
 
-  // 全局摘要 → summary store
   cleanupFns.push(
     window.electronAPI.on('python:global-summary', (data) => {
       summaryStore.updateGlobalSummary(data);
@@ -85,9 +159,6 @@ onMounted(async () => {
     const result = await window.electronAPI.getLLMConfig();
     if (result.ok && result.config) {
       expressionService.init(result.config);
-      console.log('[App] Expression service initialized');
-    } else {
-      console.warn('[App] LLM config not available:', result.error);
     }
   } catch (err) {
     console.error('[App] Failed to load LLM config:', err);
@@ -111,12 +182,6 @@ function openOverlay() {
   if (window.electronAPI) {
     window.electronAPI.openOverlay();
   }
-}
-
-async function switchAudioSource() {
-  if (!window.electronAPI) return;
-  const next = audioSource.value === 'wasapi' ? 'mic' : 'wasapi';
-  await window.electronAPI.sendControl('switch_source', { source: next });
 }
 
 // ── 会议历史方法 ──
@@ -191,6 +256,7 @@ async function loadMeeting(meetingId) {
       id: i + 1,
       text: t.text,
       language: t.language || '',
+      speaker: t.speaker || '',
       timestamp: t.timestamp
         ? new Date(t.timestamp * 1000).toLocaleTimeString()
         : '',
@@ -236,6 +302,7 @@ async function loadMeeting(meetingId) {
 
 async function deleteMeeting(meetingId) {
   if (!window.electronAPI?.deleteMeeting) return;
+  if (!window.confirm('确定要删除此会议记录？此操作不可恢复。')) return;
   try {
     const result = await window.electronAPI.deleteMeeting(meetingId);
     if (result.ok) {
@@ -284,44 +351,59 @@ function formatDuration(start, end) {
   <!-- 主窗口视图 -->
   <div v-else class="app">
     <header class="header">
-      <h1 class="title">Imok Meeting Assistant</h1>
+      <h1 class="title">Imok</h1>
       <div class="header-actions">
+        <!-- 会议开始/停止按钮 -->
         <button
-          class="btn-audio-source"
-          :class="audioSource"
-          @click="switchAudioSource"
-          :title="audioSource === 'wasapi' ? '当前：系统音频（点击切换到麦克风）' : '当前：麦克风（点击切换到系统音频）'"
+          v-if="!meetingActive"
+          class="btn-meeting btn-start"
+          @click="startMeeting"
+          :disabled="status === 'loading'"
+          title="开始会议录制"
         >
-          {{ audioSource === 'wasapi' ? '🔊 系统音频' : '🎤 麦克风' }}
-        </button>
-        <button class="btn-overlay" @click="openOverlay" title="打开悬浮字幕">
-          字幕窗
+          ▶ 开始会议
         </button>
         <button
-          class="btn-mute-panel"
-          @click="muteAssistStore.toggleVisible()"
-          title="闭麦表达助手 (Ctrl+Shift+M)"
+          v-else
+          class="btn-meeting btn-stop"
+          @click="stopMeeting"
+          title="停止会议录制"
         >
-          闭麦助手
+          ⏹ 停止
         </button>
+
+        <!-- 音频源独立开关 -->
+        <label class="audio-toggle" :class="{ active: systemAudioEnabled }" title="系统音频（Teams/Zoom 等）">
+          <input type="checkbox" v-model="systemAudioEnabled" @change="onAudioToggle" />
+          🔊
+        </label>
+        <label class="audio-toggle" :class="{ active: micEnabled }" title="麦克风">
+          <input type="checkbox" v-model="micEnabled" @change="onAudioToggle" />
+          🎤
+        </label>
+
+        <span class="header-sep"></span>
+
+        <!-- 功能按钮 -->
+        <button class="btn-icon" @click="openOverlay" title="打开悬浮字幕">🎯</button>
+        <button class="btn-icon" @click="muteAssistStore.toggleVisible()" title="闭麦表达助手 (Ctrl+Shift+M)">💬</button>
+        <button class="btn-icon" @click="summaryStore.toggleVisible()" title="会议摘要面板">📝</button>
         <button
-          class="btn-summary"
-          @click="summaryStore.toggleVisible()"
-          title="会议摘要面板"
-        >
-          摘要
-        </button>
-        <button
-          class="btn-history"
+          class="btn-icon"
           :class="{ active: historyVisible }"
           @click="toggleHistory"
           title="查看历史会议记录"
-        >
-          📂 历史
-        </button>
+        >📂</button>
+
         <span class="status-badge" :class="status">{{ status }}</span>
       </div>
     </header>
+
+    <!-- 错误通知条 -->
+    <div v-if="errorMessage" class="error-bar">
+      <span>⚠ {{ errorMessage }}</span>
+      <button class="error-dismiss" @click="dismissError">✕</button>
+    </div>
 
     <!-- 回看提示条 -->
     <div v-if="loadedMeetingId" class="review-bar">
@@ -352,9 +434,8 @@ function formatDuration(start, end) {
               <span class="history-status" :class="m.status">{{ m.status === 'running' ? '进行中' : '已结束' }}</span>
             </div>
             <div class="history-item-meta">
-              <span v-if="m.audio_source" class="meta-tag">{{ m.audio_source === 'wasapi' ? '🔊 系统音频' : '🎤 麦克风' }}</span>
-              <span class="meta-tag">💬 {{ m.transcription_count || 0 }} 条字幕</span>
-              <span v-if="m.has_summary" class="meta-tag summary-tag">📋 有摘要</span>
+              <span class="meta-tag">💬 {{ m.transcription_count || 0 }} 条</span>
+              <span v-if="m.has_summary" class="meta-tag summary-tag">📋 摘要</span>
               <span class="meta-tag">⏱ {{ formatDuration(m.started_at, m.ended_at) }}</span>
             </div>
           </div>
@@ -376,9 +457,9 @@ function formatDuration(start, end) {
 
       <section class="transcription-panel">
         <h2>实时字幕</h2>
-        <div class="transcription-list">
+        <div class="transcription-list" ref="transcriptionListRef">
           <p v-if="transcriptions.length === 0" class="placeholder">
-            等待语音输入…
+            {{ meetingActive ? '等待语音输入…' : '点击「开始会议」启动录制' }}
           </p>
           <div
             v-for="item in transcriptions"
@@ -386,6 +467,7 @@ function formatDuration(start, end) {
             class="transcription-item"
           >
             <span class="time">{{ item.timestamp }}</span>
+            <span class="speaker" v-if="item.speaker">[{{ item.speaker }}]</span>
             <span class="lang" v-if="item.language">[{{ item.language }}]</span>
             <span class="text">{{ item.text }}</span>
           </div>
@@ -403,100 +485,143 @@ function formatDuration(start, end) {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+/* ── Header ── */
+
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid #e0e0e0;
   background: #fafafa;
+  gap: 8px;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-.btn-overlay {
-  font-size: 12px;
-  padding: 4px 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
+.title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  flex-shrink: 0;
   color: #333;
-  cursor: pointer;
 }
 
-.btn-overlay:hover {
+.header-sep {
+  width: 1px;
+  height: 20px;
+  background: #ddd;
+  margin: 0 2px;
+}
+
+/* ── 会议开始/停止按钮 ── */
+
+.btn-meeting {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-start {
+  background: #4caf50;
+  color: #fff;
+}
+
+.btn-start:hover:not(:disabled) {
+  background: #388e3c;
+}
+
+.btn-start:disabled {
+  background: #a5d6a7;
+  cursor: not-allowed;
+}
+
+.btn-stop {
+  background: #ef5350;
+  color: #fff;
+}
+
+.btn-stop:hover {
+  background: #c62828;
+}
+
+/* ── 音频源开关 ── */
+
+.audio-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  opacity: 0.45;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.audio-toggle input {
+  display: none;
+}
+
+.audio-toggle.active {
+  opacity: 1;
   background: #e3f2fd;
   border-color: #90caf9;
 }
 
-.btn-mute-panel {
-  font-size: 12px;
-  padding: 4px 10px;
-  border: 1px solid #ccc;
+.audio-toggle:hover {
+  opacity: 0.85;
+  border-color: #bbb;
+}
+
+/* ── 图标按钮 ── */
+
+.btn-icon {
+  width: 32px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #ddd;
   border-radius: 4px;
   background: #fff;
-  color: #333;
   cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  transition: all 0.15s;
 }
 
-.btn-mute-panel:hover {
-  background: #fff3e0;
-  border-color: #ffb74d;
+.btn-icon:hover {
+  background: #e8e8e8;
+  border-color: #bbb;
 }
 
-.btn-summary {
-  font-size: 12px;
-  padding: 4px 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  color: #333;
-  cursor: pointer;
-}
-
-.btn-summary:hover {
-  background: #e8f5e9;
-  border-color: #81c784;
-}
-
-.btn-audio-source {
-  font-size: 12px;
-  padding: 4px 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  color: #333;
-  cursor: pointer;
-}
-
-.btn-audio-source.wasapi {
+.btn-icon.active {
   background: #e8eaf6;
-  border-color: #7986cb;
-  color: #283593;
+  border-color: #9575cd;
 }
 
-.btn-audio-source.mic {
-  background: #fce4ec;
-  border-color: #f48fb1;
-  color: #880e4f;
-}
-
-.title {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0;
-}
+/* ── 状态徽章 ── */
 
 .status-badge {
-  font-size: 12px;
+  font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
   background: #e0e0e0;
   color: #666;
+  flex-shrink: 0;
 }
 
 .status-badge.ready {
@@ -509,74 +634,46 @@ function formatDuration(start, end) {
   color: #1565c0;
 }
 
+.status-badge.loading {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.status-badge.stopped {
+  background: #fafafa;
+  color: #999;
+}
+
 .status-badge.error {
   background: #ffebee;
   color: #c62828;
 }
 
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-}
+/* ── 错误通知条 ── */
 
-.transcription-panel h2 {
-  font-size: 14px;
-  color: #555;
-  margin: 0 0 12px 0;
-}
-
-.transcription-list {
+.error-bar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #ffebee;
+  border-bottom: 1px solid #ef9a9a;
+  font-size: 13px;
+  color: #c62828;
 }
 
-.placeholder {
-  color: #999;
-  font-style: italic;
-}
-
-.transcription-item {
-  display: flex;
-  gap: 8px;
+.error-dismiss {
+  border: none;
+  background: none;
   font-size: 14px;
-  line-height: 1.5;
-}
-
-.time {
-  color: #999;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.lang {
-  color: #1565c0;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.text {
-  color: #333;
-}
-
-/* ── 历史会议按钮 ── */
-
-.btn-history {
-  font-size: 12px;
-  padding: 4px 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  color: #333;
   cursor: pointer;
+  color: #c62828;
+  padding: 2px 6px;
 }
 
-.btn-history:hover,
-.btn-history.active {
-  background: #ede7f6;
-  border-color: #9575cd;
-  color: #4527a0;
+.error-dismiss:hover {
+  background: rgba(0,0,0,0.08);
+  border-radius: 4px;
 }
 
 /* ── 回看提示条 ── */
@@ -585,7 +682,7 @@ function formatDuration(start, end) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 16px;
+  padding: 6px 12px;
   background: #fff3e0;
   border-bottom: 1px solid #ffe0b2;
   font-size: 13px;
@@ -607,12 +704,71 @@ function formatDuration(start, end) {
   color: #fff;
 }
 
+/* ── 主内容区 ── */
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.transcription-panel h2 {
+  font-size: 14px;
+  color: #555;
+  margin: 0 0 8px 0;
+}
+
+.transcription-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+}
+
+.placeholder {
+  color: #999;
+  font-style: italic;
+  text-align: center;
+  padding: 32px 0;
+}
+
+.transcription-item {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.time {
+  color: #999;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.lang {
+  color: #1565c0;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.speaker {
+  color: #6a1b9a;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.text {
+  color: #333;
+}
+
 /* ── 历史面板 ── */
 
 .history-panel {
   border-bottom: 1px solid #e0e0e0;
   background: #fafafa;
-  max-height: 320px;
+  max-height: 280px;
   overflow-y: auto;
 }
 
@@ -620,7 +776,7 @@ function formatDuration(start, end) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
+  padding: 6px 12px;
   border-bottom: 1px solid #eee;
   position: sticky;
   top: 0;
@@ -629,7 +785,7 @@ function formatDuration(start, end) {
 }
 
 .history-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -648,20 +804,20 @@ function formatDuration(start, end) {
 
 .history-loading,
 .history-empty {
-  padding: 24px 16px;
+  padding: 20px 12px;
   text-align: center;
   color: #999;
   font-size: 13px;
 }
 
 .history-list {
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .history-item {
   display: flex;
   align-items: center;
-  padding: 8px 16px;
+  padding: 6px 12px;
   border-bottom: 1px solid #f0f0f0;
   transition: background 0.15s;
 }
@@ -685,17 +841,17 @@ function formatDuration(start, end) {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .history-date {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: #333;
 }
 
 .history-status {
-  font-size: 11px;
+  font-size: 10px;
   padding: 1px 6px;
   border-radius: 8px;
   background: #e0e0e0;
@@ -719,7 +875,7 @@ function formatDuration(start, end) {
 }
 
 .meta-tag {
-  font-size: 11px;
+  font-size: 10px;
   color: #888;
 }
 
@@ -734,7 +890,7 @@ function formatDuration(start, end) {
   font-size: 14px;
   cursor: pointer;
   padding: 4px 6px;
-  opacity: 0.4;
+  opacity: 0.3;
   transition: opacity 0.15s;
 }
 

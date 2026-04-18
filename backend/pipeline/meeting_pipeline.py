@@ -23,6 +23,7 @@ from typing import Callable, List, Optional
 from backend.asr.base import ASREngine, TranscriptionResult
 from backend.asr.vad import AudioSegment, VoiceActivityDetector
 from backend.audio.base import AudioChunk, AudioSource
+from backend.speaker.base import SpeakerEmbedderBase, SpeakerTrackerBase
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class TranscriptionEvent:
     result: TranscriptionResult
     segment_start_time: float  # VAD 检测到的语音段起始时间 (秒)
     segment_end_time: float
+    speaker: str = ""  # 说话人 ID（如 "Speaker_1"），空字符串表示未识别
     timestamp: float = field(default_factory=time.time)  # 事件产生的墙钟时间
 
 
@@ -74,10 +76,14 @@ class MeetingPipeline:
         vad: VoiceActivityDetector,
         asr: ASREngine,
         max_asr_workers: int = 1,
+        speaker_embedder: Optional[SpeakerEmbedderBase] = None,
+        speaker_tracker: Optional[SpeakerTrackerBase] = None,
     ) -> None:
         self._audio_source = audio_source
         self._vad = vad
         self._asr = asr
+        self._speaker_embedder = speaker_embedder
+        self._speaker_tracker = speaker_tracker
 
         self._callbacks: List[TranscriptionCallback] = []
         self._state = PipelineState.IDLE
@@ -230,10 +236,26 @@ class MeetingPipeline:
                 )
                 return
 
+            # 说话人识别（可选）
+            speaker = ""
+            if self._speaker_embedder is not None and self._speaker_tracker is not None:
+                try:
+                    embedding = await loop.run_in_executor(
+                        None,
+                        self._speaker_embedder.embed,
+                        segment.audio_data,
+                        segment.sample_rate,
+                    )
+                    if embedding is not None:
+                        speaker = self._speaker_tracker.identify(embedding)
+                except Exception:
+                    logger.debug("Speaker identification failed, continuing without.", exc_info=True)
+
             event = TranscriptionEvent(
                 result=result,
                 segment_start_time=segment.start_time,
                 segment_end_time=segment.end_time,
+                speaker=speaker,
             )
 
             # 通知所有回调

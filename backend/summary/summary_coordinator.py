@@ -133,6 +133,7 @@ class SummaryCoordinator:
             language=event.result.language,
             start_time=event.segment_start_time,
             end_time=event.segment_end_time,
+            speaker=event.speaker,
         )
 
     def _on_window_complete(self, content: WindowContent) -> None:

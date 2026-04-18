@@ -21,6 +21,7 @@ class TranscriptEntry:
     language: str
     start_time: float  # 相对会议开始的秒数
     end_time: float
+    speaker: str = ""  # 说话人 ID
 
 
 @dataclass
@@ -35,8 +36,16 @@ class WindowContent:
 
     @property
     def merged_text(self) -> str:
-        """合并所有转写文本为单一字符串。"""
-        return "\n".join(e.text for e in self.entries if e.text.strip())
+        """合并所有转写文本为单一字符串（含说话人标签）。"""
+        lines = []
+        for e in self.entries:
+            if not e.text.strip():
+                continue
+            if e.speaker:
+                lines.append(f"[{e.speaker}] {e.text}")
+            else:
+                lines.append(e.text)
+        return "\n".join(lines)
 
     def __post_init__(self) -> None:
         if not self.time_range:
@@ -97,6 +106,7 @@ class TimeWindowManager:
         language: str = "",
         start_time: float = 0.0,
         end_time: float = 0.0,
+        speaker: str = "",
     ) -> None:
         """添加一条转写记录。如果超出当前窗口范围，自动触发窗口完成。
 
@@ -105,12 +115,14 @@ class TimeWindowManager:
             language: 语言标识。
             start_time: 段落开始时间（秒）。
             end_time: 段落结束时间（秒）。
+            speaker: 说话人 ID。
         """
         entry = TranscriptEntry(
             text=text.strip(),
             language=language,
             start_time=start_time,
             end_time=end_time,
+            speaker=speaker,
         )
 
         if not entry.text:

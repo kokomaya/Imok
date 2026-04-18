@@ -34,6 +34,7 @@ aiosqlite>=0.20.0
 # ==============================================================================
 torch>=2.1.0                 # Required by faster-whisper and Silero-VAD
 torchaudio>=2.1.0            # Required by Silero-VAD (torch.hub)
+speechbrain>=1.0.0           # Speaker embedding (ECAPA-TDNN)
 # NOTE: For CUDA support, install torch with the appropriate CUDA version:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu121
 

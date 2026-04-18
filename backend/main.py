@@ -167,12 +167,43 @@ async def _run_cli(source_type: str) -> None:
 
 
 def _create_audio_source(source_type: str):
-    """创建音频源（CLI 和 subprocess 共享逻辑）。"""
+    """创建音频源。
+
+    支持的 source_type:
+    - 'wasapi': 仅系统音频
+    - 'mic': 仅麦克风
+    - 'both': 系统音频 + 麦克风混合
+    """
     from backend.config import get_settings
 
     settings = get_settings()
 
-    if source_type == "wasapi":
+    if source_type == "both":
+        from backend.audio.mixer import AudioMixer
+        from backend.audio.mic_source import MicrophoneSource
+        from backend.audio.wasapi_source import WASAPILoopbackSource
+
+        mixer = AudioMixer(
+            target_sample_rate=settings.audio.sample_rate,
+            chunk_duration_s=settings.audio.chunk_frames / settings.audio.sample_rate,
+        )
+        mixer.add_source(
+            "wasapi",
+            WASAPILoopbackSource(
+                target_sample_rate=settings.audio.sample_rate,
+                chunk_frames=settings.audio.chunk_frames,
+            ),
+        )
+        mixer.add_source(
+            "mic",
+            MicrophoneSource(
+                target_sample_rate=settings.audio.sample_rate,
+                chunk_frames=settings.audio.chunk_frames,
+                device_index=settings.audio.mic_device,
+            ),
+        )
+        return mixer
+    elif source_type == "wasapi":
         from backend.audio.wasapi_source import WASAPILoopbackSource
 
         return WASAPILoopbackSource(
@@ -253,6 +284,7 @@ async def _run_subprocess(source_type: str) -> None:
     pipeline = None
     summary_coordinator = None
     llm_client = None
+    speaker_tracker = None  # 说话人跟踪器（需在 stop 时持久化）
     meeting_store = MeetingStore(get_settings().paths.data_dir)
     meeting_id: str | None = None
     stop_event = asyncio.Event()
@@ -269,6 +301,7 @@ async def _run_subprocess(source_type: str) -> None:
             confidence=r.language_probability,
             segment_start=event.segment_start_time,
             segment_end=event.segment_end_time,
+            speaker=event.speaker,
         )
         writer.write(msg)
 
@@ -319,6 +352,7 @@ async def _run_subprocess(source_type: str) -> None:
             timestamp=event.timestamp,
             language=r.language,
             confidence=r.language_probability,
+            speaker=event.speaker,
             segment_start=event.segment_start_time,
             segment_end=event.segment_end_time,
         )
@@ -371,7 +405,7 @@ async def _run_subprocess(source_type: str) -> None:
 
     async def _start_pipeline(src_type: str) -> MeetingPipeline:
         """创建并启动 Pipeline + SummaryCoordinator。"""
-        nonlocal summary_coordinator, llm_client, meeting_id
+        nonlocal summary_coordinator, llm_client, meeting_id, speaker_tracker
 
         writer.write(IPCMessage.status(ProcessState.LOADING, message="Loading models..."))
 
@@ -381,7 +415,23 @@ async def _run_subprocess(source_type: str) -> None:
             asr = _create_asr()
             asr.load()
 
-            pl = MeetingPipeline(audio_src, vad, asr)
+            # 初始化说话人识别（可选）
+            speaker_embedder = None
+            speaker_tracker = None
+            try:
+                from backend.speaker.embedder import SpeakerEmbedder
+                from backend.speaker.tracker import SpeakerTracker
+                speaker_embedder = SpeakerEmbedder()
+                speaker_tracker = SpeakerTracker()
+                logger.info("Speaker diarization enabled.")
+            except Exception:
+                logger.info("Speaker diarization unavailable, continuing without.")
+
+            pl = MeetingPipeline(
+                audio_src, vad, asr,
+                speaker_embedder=speaker_embedder,
+                speaker_tracker=speaker_tracker,
+            )
             pl.on_transcription(_on_transcription)
 
             # 初始化存储（创建会议文件夹）
@@ -428,7 +478,7 @@ async def _run_subprocess(source_type: str) -> None:
             raise
 
     async def _stop_pipeline() -> None:
-        nonlocal pipeline, summary_coordinator, llm_client, meeting_id
+        nonlocal pipeline, summary_coordinator, llm_client, meeting_id, speaker_tracker
 
         if summary_coordinator is not None:
             try:
@@ -449,6 +499,15 @@ async def _run_subprocess(source_type: str) -> None:
             pipeline = None
             writer.write(IPCMessage.status(ProcessState.STOPPED))
 
+        # 持久化说话人跟踪状态
+        if speaker_tracker is not None and meeting_id is not None:
+            try:
+                meeting_store.save_speakers(meeting_id, speaker_tracker.to_dict())
+                logger.info("Speaker profiles saved for meeting %s", meeting_id)
+            except Exception:
+                logger.exception("Error saving speaker profiles")
+        speaker_tracker = None
+
         if meeting_id is not None:
             try:
                 meeting_store.finish_meeting(meeting_id)
@@ -468,7 +527,7 @@ async def _run_subprocess(source_type: str) -> None:
             asyncio.run_coroutine_threadsafe(_do_stop(), main_loop)
         elif action == ControlAction.SWITCH_SOURCE:
             new_source = message.data.get("source", "")
-            if new_source in ("wasapi", "mic"):
+            if new_source in ("wasapi", "mic", "both"):
                 current_source_type = new_source
                 asyncio.run_coroutine_threadsafe(_do_restart(new_source), main_loop)
             else:
