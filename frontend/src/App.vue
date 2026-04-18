@@ -311,6 +311,8 @@ async function deleteMeeting(meetingId) {
       );
       if (loadedMeetingId.value === meetingId) {
         loadedMeetingId.value = null;
+        transcriptions.value = [];
+        summaryStore.clearAll();
       }
     }
   } catch (err) {
