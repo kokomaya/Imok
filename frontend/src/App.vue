@@ -72,6 +72,10 @@ async function startMeeting() {
     showError('请至少启用一个音频源（系统音频或麦克风）');
     return;
   }
+  // 清空上一次会议的残留数据，避免新旧数据混合
+  transcriptions.value = [];
+  summaryStore.clearAll();
+
   const source = getSourceType();
   // 先切换音频源配置，再启动
   await window.electronAPI.sendControl('switch_source', { source });
@@ -348,6 +352,17 @@ async function backToLive() {
   summaryStore.clearAll();  // clearAll already resets reviewMode
 }
 
+function clearTranscriptions() {
+  transcriptions.value = [];
+}
+
+function onEditTranscription(item, event) {
+  const newText = event.target.textContent.trim();
+  if (newText !== item.text) {
+    item.text = newText;
+  }
+}
+
 function formatMeetingTime(epoch) {
   if (!epoch) return '';
   const d = new Date(epoch * 1000);
@@ -479,7 +494,17 @@ function formatDuration(start, end) {
       <MuteAssistPanel />
 
       <section class="transcription-panel">
-        <h2>实时字幕</h2>
+        <div class="transcription-header">
+          <h2>实时字幕</h2>
+          <button
+            v-if="transcriptions.length > 0"
+            class="btn-clear-transcriptions"
+            @click="clearTranscriptions"
+            title="清空当前字幕"
+          >
+            🗑 清空
+          </button>
+        </div>
         <div class="transcription-list" ref="transcriptionListRef">
           <p v-if="transcriptions.length === 0" class="placeholder">
             {{ meetingActive ? '等待语音输入…' : '点击「开始会议」启动录制' }}
@@ -492,7 +517,12 @@ function formatDuration(start, end) {
             <span class="time">{{ item.timestamp }}</span>
             <span class="speaker" v-if="item.speaker">[{{ item.speaker }}]</span>
             <span class="lang" v-if="item.language">[{{ item.language }}]</span>
-            <span class="text">{{ item.text }}</span>
+            <span
+              class="text"
+              contenteditable="true"
+              @blur="onEditTranscription(item, $event)"
+              @keydown.enter.prevent="$event.target.blur()"
+            >{{ item.text }}</span>
           </div>
         </div>
       </section>
@@ -738,7 +768,31 @@ function formatDuration(start, end) {
 .transcription-panel h2 {
   font-size: 14px;
   color: #555;
-  margin: 0 0 8px 0;
+  margin: 0;
+}
+
+.transcription-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.btn-clear-transcriptions {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-clear-transcriptions:hover {
+  background: #ffebee;
+  border-color: #ef9a9a;
+  color: #c62828;
 }
 
 .transcription-list {
@@ -784,6 +838,20 @@ function formatDuration(start, end) {
 
 .text {
   color: #333;
+  outline: none;
+  border-radius: 2px;
+  padding: 0 2px;
+  min-width: 20px;
+  cursor: text;
+}
+
+.text:hover {
+  background: #f5f5f5;
+}
+
+.text:focus {
+  background: #e3f2fd;
+  box-shadow: 0 0 0 1px #90caf9;
 }
 
 /* ── 历史面板 ── */
