@@ -53,6 +53,13 @@ class MicrophoneSource(AudioSource):
         if self._active:
             return
 
+        # 解除系统级麦克风静音（通信软件可绕过，sounddevice 不行）
+        try:
+            from backend.audio.mic_unmute import ensure_mic_unmuted
+            ensure_mic_unmuted()
+        except Exception:
+            logger.debug("Could not check mic mute state", exc_info=True)
+
         # 查询设备信息
         if self._device_index is not None:
             dev_info = sd.query_devices(self._device_index, kind="input")
@@ -60,7 +67,8 @@ class MicrophoneSource(AudioSource):
             dev_info = sd.query_devices(kind="input")
 
         self._device_sr = int(dev_info["default_samplerate"])
-        self._device_channels = min(dev_info["max_input_channels"], 1) or 1
+        # WASAPI 要求使用设备原生声道数，不能任意指定；后续 to_mono_float32 会转为单声道
+        self._device_channels = max(dev_info["max_input_channels"], 1)
 
         # 按设备原生采样率计算 blocksize，使 chunk 时长与目标一致
         device_blocksize = int(

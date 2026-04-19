@@ -74,11 +74,24 @@ def _test_mic(device_index: int, seconds: float) -> dict:
     """测试麦克风设备。"""
     import sounddevice as sd
 
-    rate = 16000
+    # 解除系统级麦克风静音（通信软件可绕过，sounddevice 不行）
+    try:
+        from backend.audio.mic_unmute import ensure_mic_unmuted
+        ensure_mic_unmuted()
+    except Exception:
+        pass
+
+    # 使用设备原生采样率（WASAPI 不支持任意采样率）
+    dev_info = sd.query_devices(device_index, kind="input")
+    rate = int(dev_info["default_samplerate"])
+    channels = max(dev_info["max_input_channels"], 1)
     frames = int(rate * seconds)
-    audio = sd.rec(frames, samplerate=rate, channels=1, dtype="float32",
+    audio = sd.rec(frames, samplerate=rate, channels=channels, dtype="float32",
                    device=device_index)
     sd.wait()
+    # 多声道转 mono
+    if audio.ndim == 2:
+        audio = audio.mean(axis=1)
     audio = audio.flatten()
     return _audio_stats(audio, rate)
 

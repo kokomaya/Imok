@@ -223,6 +223,7 @@ async def _run_subprocess(source_type: str) -> None:
     writer.write(IPCMessage.status(ProcessState.READY))
 
     pipeline = None
+    _pipeline_lock = asyncio.Lock()
     summary_coordinator = None
     llm_client = None
     speaker_tracker = None  # 说话人跟踪器（需在 stop 时持久化）
@@ -550,23 +551,26 @@ async def _run_subprocess(source_type: str) -> None:
 
     async def _do_start() -> None:
         nonlocal pipeline
-        if pipeline is not None:
-            return
-        try:
-            pipeline = await _start_pipeline(current_source_type)
-        except Exception:
-            pass  # 错误已在 _start_pipeline 中通过 IPC 报告
+        async with _pipeline_lock:
+            if pipeline is not None:
+                return
+            try:
+                pipeline = await _start_pipeline(current_source_type)
+            except Exception:
+                pass  # 错误已在 _start_pipeline 中通过 IPC 报告
 
     async def _do_stop() -> None:
-        await _stop_pipeline()
+        async with _pipeline_lock:
+            await _stop_pipeline()
 
     async def _do_restart(new_source: str) -> None:
         nonlocal pipeline
-        await _stop_pipeline()
-        try:
-            pipeline = await _start_pipeline(new_source)
-        except Exception:
-            pass
+        async with _pipeline_lock:
+            await _stop_pipeline()
+            try:
+                pipeline = await _start_pipeline(new_source)
+            except Exception:
+                pass
 
     async def _do_trigger_segment_summary() -> None:
         if summary_coordinator is None:

@@ -11,12 +11,23 @@ import sys
 
 
 def _list_input_devices() -> list[dict]:
-    """列出所有输入设备（sounddevice）。"""
+    """列出输入设备（sounddevice）。
+
+    只展示 Windows WASAPI 设备（最佳质量/最低延迟），
+    过滤虚拟 mapper 和 MME/WDM-KS 重复条目。
+    若无 WASAPI 设备则回退到 DirectSound。
+    """
+    PREFERRED_API = "Windows WASAPI"
+    FALLBACK_API = "Windows DirectSound"
+    # 虚拟 mapper 设备名关键词（非真实物理设备）
+    VIRTUAL_KEYWORDS = ("Sound Mapper", "Primary Sound")
+
     devices = []
     try:
         import sounddevice as sd
 
         host_apis = sd.query_hostapis()
+        all_devs = []
         for idx, dev in enumerate(sd.query_devices()):
             if dev["max_input_channels"] <= 0:
                 continue
@@ -25,15 +36,27 @@ def _list_input_devices() -> list[dict]:
                 if dev["hostapi"] < len(host_apis)
                 else "Unknown"
             )
-            devices.append({
+            name = dev["name"]
+            # 跳过虚拟 mapper 设备
+            if any(kw in name for kw in VIRTUAL_KEYWORDS):
+                continue
+            all_devs.append({
                 "index": idx,
-                "name": dev["name"],
+                "name": name,
                 "hostApi": api_name,
                 "maxInputChannels": dev["max_input_channels"],
                 "sampleRate": dev["default_samplerate"],
                 "isLoopback": False,
                 "isDefault": idx == sd.default.device[0],
             })
+
+        # 优先取 WASAPI 设备；没有的话回退到 DirectSound；都没有则全部返回
+        wasapi = [d for d in all_devs if PREFERRED_API in d["hostApi"]]
+        if wasapi:
+            devices = wasapi
+        else:
+            ds = [d for d in all_devs if FALLBACK_API in d["hostApi"]]
+            devices = ds if ds else all_devs
     except Exception as exc:
         print(f"[list_devices] input error: {exc}", file=sys.stderr)
     return devices
