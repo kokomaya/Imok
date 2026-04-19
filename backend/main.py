@@ -465,6 +465,20 @@ async def _run_subprocess(source_type: str) -> None:
             writer.write(IPCMessage.error("pipeline_start_failed", str(exc)))
             raise
 
+    async def _finalize_summary(sc, lc) -> None:
+        """后台完成摘要合并和 LLM 客户端关闭（不阻塞 UI）。"""
+        if sc is not None:
+            try:
+                await sc.stop()
+            except Exception:
+                logger.exception("Error stopping summary coordinator (background)")
+        if lc is not None:
+            try:
+                await lc.close()
+            except Exception:
+                logger.exception("Error closing LLM client (background)")
+        logger.info("Background summary finalization completed.")
+
     async def _stop_pipeline() -> None:
         nonlocal pipeline, summary_coordinator, llm_client, meeting_id, speaker_tracker
 
@@ -472,45 +486,38 @@ async def _run_subprocess(source_type: str) -> None:
         stopped_meeting_id = meeting_id or ""
         writer.write(IPCMessage.status(ProcessState.STOPPING, meeting_id=stopped_meeting_id))
 
-        # 优先停止音频采集（快，<1s），让用户看到录音已停
+        # 停止音频采集（停源 + flush VAD + drain ASR）
         if pipeline is not None:
             await pipeline.stop()
             pipeline = None
 
-        # 然后停止摘要协调器（可能慢，涉及 LLM 调用）
-        if summary_coordinator is not None:
+        # 持久化说话人跟踪状态（快，纯本地文件）
+        if speaker_tracker is not None and stopped_meeting_id:
             try:
-                await summary_coordinator.stop()
-            except Exception:
-                logger.exception("Error stopping summary coordinator")
-            summary_coordinator = None
-
-        if llm_client is not None:
-            try:
-                await llm_client.close()
-            except Exception:
-                logger.exception("Error closing LLM client")
-            llm_client = None
-
-        # 通知前端：完全停止
-        writer.write(IPCMessage.status(ProcessState.STOPPED, meeting_id=stopped_meeting_id))
-
-        # 持久化说话人跟踪状态
-        if speaker_tracker is not None and meeting_id is not None:
-            try:
-                meeting_store.save_speakers(meeting_id, speaker_tracker.to_dict())
-                logger.info("Speaker profiles saved for meeting %s", meeting_id)
+                meeting_store.save_speakers(stopped_meeting_id, speaker_tracker.to_dict())
+                logger.info("Speaker profiles saved for meeting %s", stopped_meeting_id)
             except Exception:
                 logger.exception("Error saving speaker profiles")
         speaker_tracker = None
 
-        if meeting_id is not None:
+        if stopped_meeting_id:
             try:
-                meeting_store.finish_meeting(meeting_id)
-                logger.info("Meeting finished: %s", meeting_id)
+                meeting_store.finish_meeting(stopped_meeting_id)
+                logger.info("Meeting finished: %s", stopped_meeting_id)
             except Exception:
                 logger.exception("Error finishing meeting")
-            meeting_id = None
+        meeting_id = None
+
+        # 先发 STOPPED，让前端立刻结束等待
+        writer.write(IPCMessage.status(ProcessState.STOPPED, meeting_id=stopped_meeting_id))
+
+        # 摘要协调器收尾（涉及 LLM 调用，可能 5-20s）放后台执行
+        # 摘要结果仍通过现有 IPC 回调推送给前端
+        sc, lc = summary_coordinator, llm_client
+        summary_coordinator = None
+        llm_client = None
+        if sc is not None or lc is not None:
+            asyncio.create_task(_finalize_summary(sc, lc))
 
     def _handle_control(message: IPCMessage) -> None:
         """处理 stdin 控制命令（从 reader 线程调用，通过 main_loop 调度协程）。"""
