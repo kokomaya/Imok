@@ -56,6 +56,7 @@ const RECEIVE_CHANNELS = [
   'llm:chat-stream-chunk',
   'llm:chat-stream-done',
   'llm:chat-stream-error',
+  'overlay:toggle-lock',
 ];
 
 // ---------------------------------------------------------------

@@ -13,6 +13,16 @@ const emit = defineEmits(['save', 'lock-toggle', 'close']);
 
 const { settings, DEFAULT_SETTINGS } = subtitleSettingsStore;
 
+const FONT_OPTIONS = [
+  { value: 'default', label: '默认' },
+  { value: 'Microsoft YaHei', label: '微软雅黑' },
+  { value: 'SimHei', label: '黑体' },
+  { value: 'KaiTi', label: '楷体' },
+  { value: 'Source Han Sans CN', label: '思源黑体' },
+  { value: 'Consolas', label: 'Consolas' },
+  { value: 'Arial', label: 'Arial' },
+];
+
 function onLockToggle() {
   settings.locked = !settings.locked;
   emit('lock-toggle', settings.locked);
@@ -77,18 +87,16 @@ function onReset() {
       />
     </div>
 
-    <!-- 行 2：背景与行数 -->
+    <!-- 行 2：背景、行数、透明度 -->
     <div class="settings-row">
       <label class="setting-label">背景</label>
       <input
-        type="range"
-        class="setting-slider"
-        v-model.number="settings.bgOpacity"
-        :min="0" :max="100" :step="5"
+        type="color"
+        class="setting-color"
+        v-model="settings.bgColor"
         @input="onChange"
-        title="背景不透明度"
+        title="背景颜色"
       />
-      <span class="setting-value">{{ settings.bgOpacity }}%</span>
     </div>
 
     <div class="settings-row">
@@ -102,6 +110,36 @@ function onReset() {
         title="显示字幕行数"
       />
       <span class="setting-value">{{ settings.visibleLines }}</span>
+    </div>
+
+    <div class="settings-row">
+      <label class="setting-label">透明</label>
+      <input
+        type="range"
+        class="setting-slider"
+        v-model.number="settings.subtitleOpacity"
+        :min="10" :max="100" :step="1"
+        @input="onChange"
+        title="字幕区域透明度"
+      />
+      <span class="setting-value">{{ settings.subtitleOpacity }}%</span>
+    </div>
+
+    <div class="settings-row">
+      <label class="setting-label">字体</label>
+      <select
+        class="setting-select"
+        v-model="settings.fontFamily"
+        @change="onChange"
+        title="字体"
+      >
+        <option
+          v-for="opt in FONT_OPTIONS"
+          :key="opt.value"
+          :value="opt.value"
+          :style="{ fontFamily: opt.value === 'default' ? 'inherit' : opt.value }"
+        >{{ opt.label }}</option>
+      </select>
     </div>
 
     <!-- 行 3：开关控制 -->
@@ -126,9 +164,15 @@ function onReset() {
       >B</button>
       <button
         class="toggle-btn"
+        :class="{ active: settings.immersive }"
+        @click="settings.immersive = !settings.immersive; onChange()"
+        title="沉浸模式（隐藏控件，悬停时显示）"
+      >👁</button>
+      <button
+        class="toggle-btn"
         :class="{ active: settings.locked }"
         @click="onLockToggle"
-        title="锁定/解锁窗口（锁定后鼠标穿透）"
+        title="锁定/解锁窗口（锁定后鼠标穿透，Ctrl+Shift+L 解锁）"
       >{{ settings.locked ? '🔒' : '🔓' }}</button>
       <button
         class="toggle-btn"

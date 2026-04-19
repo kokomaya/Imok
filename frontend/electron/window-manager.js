@@ -202,7 +202,24 @@ class WindowManager {
       this._overlayWindow.setIgnoreMouseEvents(clickThrough, { forward: true });
     }
   }
-
+  /**
+   * 切换锁定状态并通知渲染进程同步 UI。
+   * 由全局快捷键触发，解决锁定后无法点击解锁的问题。
+   */
+  toggleLockOverlay() {
+    if (!this._overlayWindow || this._overlayWindow.isDestroyed()) return;
+    // 读取当前持久化设置中的 locked 状态
+    const settings = this.loadSettings();
+    const wasLocked = !!settings.locked;
+    const newLocked = !wasLocked;
+    // 切换窗口穿透
+    this.setClickThrough(newLocked);
+    // 持久化
+    settings.locked = newLocked;
+    this.saveSettings(settings);
+    // 通知渲染进程同步 UI
+    this._overlayWindow.webContents.send('overlay:toggle-lock', newLocked);
+  }
   /**
    * 关闭字幕窗口。
    */

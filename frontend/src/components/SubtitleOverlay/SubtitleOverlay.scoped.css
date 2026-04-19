@@ -1,13 +1,31 @@
+/* 覆盖全局 html/body 白色背景，使 Electron transparent 窗口生效 */
+:global(html),
+:global(body) {
+  background: transparent !important;
+}
+
 .overlay-root {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: rgba(20, 20, 20, var(--subtitle-bg-opacity, 0.85));
+  background: var(--subtitle-bg, rgba(20, 20, 20, 0.85));
   border-radius: 8px;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   color: var(--subtitle-original-color, #e8e8e8);
   user-select: none;
+}
+
+/* 沉浸模式：控件默认隐藏，悬停时显示 */
+.overlay-root.immersive .overlay-chrome {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.overlay-root.immersive:hover .overlay-chrome {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* 拖拽条 */
@@ -142,6 +160,7 @@
 .entry-original {
   font-size: var(--subtitle-original-size, 14px);
   font-weight: var(--subtitle-font-weight, normal);
+  font-family: var(--subtitle-font-family, inherit);
   line-height: 1.4;
   color: var(--subtitle-original-color, #e8e8e8);
 }
@@ -149,6 +168,7 @@
 .entry-translation {
   font-size: var(--subtitle-translation-size, 13px);
   font-weight: var(--subtitle-font-weight, normal);
+  font-family: var(--subtitle-font-family, inherit);
   line-height: 1.4;
   color: var(--subtitle-translation-color, #90caf9);
   margin-top: 2px;

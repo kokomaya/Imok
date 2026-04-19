@@ -537,6 +537,11 @@ function registerShortcuts() {
   globalShortcut.register('CommandOrControl+Shift+M', () => {
     mainWindow?.webContents.send('mute-panel:toggle');
   });
+
+  // Ctrl+Shift+L: 切换字幕窗口锁定/解锁
+  globalShortcut.register('CommandOrControl+Shift+L', () => {
+    windowManager.toggleLockOverlay();
+  });
 }
 
 // ---------------------------------------------------------------

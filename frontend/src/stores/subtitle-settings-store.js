@@ -22,8 +22,8 @@ const DEFAULT_SETTINGS = {
   originalColor: '#e8e8e8',
   /** 译文颜色 */
   translationColor: '#90caf9',
-  /** 背景不透明度 0-100 */
-  bgOpacity: 85,
+  /** 背景颜色 */
+  bgColor: '#141414',
   /** 显示行数（最近 N 条字幕） */
   visibleLines: 5,
   /** 是否显示翻译 */
@@ -34,8 +34,14 @@ const DEFAULT_SETTINGS = {
   locked: false,
   /** 是否始终置顶 */
   alwaysOnTop: true,
+  /** 字幕区域不透明度 0-100 */
+  subtitleOpacity: 100,
+  /** 沉浸模式（隐藏控件，鼠标悬停时显示） */
+  immersive: false,
   /** 字体粗细 normal | bold */
   fontWeight: 'normal',
+  /** 字体 */
+  fontFamily: 'default',
 };
 
 // ---------------------------------------------------------------
@@ -44,18 +50,39 @@ const DEFAULT_SETTINGS = {
 
 const settings = reactive({ ...DEFAULT_SETTINGS });
 
+/**
+ * 将 hex 颜色转为 rgb 数组。
+ * @param {string} hex - 如 '#141414'
+ * @returns {[number, number, number]}
+ */
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  return [
+    parseInt(h.substring(0, 2), 16) || 0,
+    parseInt(h.substring(2, 4), 16) || 0,
+    parseInt(h.substring(4, 6), 16) || 0,
+  ];
+}
+
 // ---------------------------------------------------------------
 // CSS 变量计算（供 SubtitleOverlay 使用）
 // ---------------------------------------------------------------
 
-const cssVars = computed(() => ({
-  '--subtitle-original-size': `${settings.originalFontSize}px`,
-  '--subtitle-translation-size': `${settings.translationFontSize}px`,
-  '--subtitle-original-color': settings.originalColor,
-  '--subtitle-translation-color': settings.translationColor,
-  '--subtitle-bg-opacity': (settings.bgOpacity / 100).toFixed(2),
-  '--subtitle-font-weight': settings.fontWeight,
-}));
+const cssVars = computed(() => {
+  const [r, g, b] = hexToRgb(settings.bgColor);
+  const alpha = settings.subtitleOpacity / 100;
+  return {
+    '--subtitle-original-size': `${settings.originalFontSize}px`,
+    '--subtitle-translation-size': `${settings.translationFontSize}px`,
+    '--subtitle-original-color': settings.originalColor,
+    '--subtitle-translation-color': settings.translationColor,
+    '--subtitle-bg': `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`,
+    '--subtitle-font-weight': settings.fontWeight,
+    '--subtitle-font-family': settings.fontFamily === 'default'
+      ? 'inherit'
+      : `"${settings.fontFamily}", sans-serif`,
+  };
+});
 
 // ---------------------------------------------------------------
 // 操作方法

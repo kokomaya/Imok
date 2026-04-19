@@ -58,6 +58,7 @@ function getStatusClass(status) {
 // ---------------------------------------------------------------
 
 let saveTimer = null;
+let _unlockCleanup = null;
 
 function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer);
@@ -115,18 +116,27 @@ onMounted(async () => {
       }
     },
   });
+
+  // 监听全局快捷键切换锁定状态（解决锁定后无法点击解锁的问题）
+  if (window.electronAPI?.on) {
+    _unlockCleanup = window.electronAPI.on('overlay:toggle-lock', (locked) => {
+      settings.locked = locked;
+      scheduleSave();
+    });
+  }
 });
 
 onUnmounted(() => {
   if (saveTimer) clearTimeout(saveTimer);
+  if (_unlockCleanup) _unlockCleanup();
   ipcBridge.destroy();
 });
 </script>
 
 <template>
-  <div class="overlay-root" :style="cssVars">
+  <div class="overlay-root" :class="{ immersive: settings.immersive }" :style="cssVars">
     <!-- 拖拽条 -->
-    <div class="drag-handle" style="-webkit-app-region: drag">
+    <div class="drag-handle overlay-chrome" style="-webkit-app-region: drag">
       <span class="drag-label">字幕</span>
       <div class="drag-actions" style="-webkit-app-region: no-drag">
         <button
@@ -142,12 +152,13 @@ onUnmounted(() => {
     </div>
 
     <!-- 设置面板 -->
-    <SubtitleSettings
-      v-if="showSettings"
-      @save="onSettingsSave"
-      @lock-toggle="onLockToggle"
-      @close="showSettings = false"
-    />
+    <div class="overlay-chrome" v-if="showSettings">
+      <SubtitleSettings
+        @save="onSettingsSave"
+        @lock-toggle="onLockToggle"
+        @close="showSettings = false"
+      />
+    </div>
 
     <!-- 字幕列表 -->
     <div ref="listRef" class="subtitle-list">
