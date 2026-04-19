@@ -1,0 +1,276 @@
+.adp {
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafafa;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.adp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid #eee;
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  z-index: 1;
+}
+
+.adp-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.adp-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.adp-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #999;
+  padding: 2px 6px;
+}
+
+.adp-close:hover {
+  color: #333;
+}
+
+.adp-btn-small {
+  border: none;
+  background: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.adp-btn-small:hover {
+  opacity: 1;
+}
+
+.adp-btn-small:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.adp-error {
+  padding: 6px 12px;
+  background: #ffebee;
+  color: #c62828;
+  font-size: 12px;
+}
+
+.adp-loading {
+  padding: 12px;
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+}
+
+/* ── Section ── */
+
+.adp-section {
+  padding: 6px 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.adp-section:last-child {
+  border-bottom: none;
+}
+
+.adp-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.adp-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+/* ── 内联实时电平（标题行右侧） ── */
+
+.adp-inline-monitor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.adp-level-bar-container {
+  flex: 0 0 70px;
+  height: 6px;
+  background: #eee;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.adp-level-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.15s ease-out, background 0.3s;
+  min-width: 0;
+}
+
+.adp-wave {
+  flex: 1;
+  height: 22px;
+  min-width: 40px;
+  max-width: 120px;
+}
+
+.adp-monitor-placeholder {
+  font-size: 10px;
+  color: #bbb;
+  font-style: italic;
+}
+
+/* ── 设备列表 ── */
+
+.adp-empty {
+  padding: 8px 0;
+  color: #bbb;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.adp-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+
+.adp-device:hover {
+  background: #e8eaf6;
+}
+
+.adp-device.active {
+  background: #e3f2fd;
+  border-left: 3px solid #1565c0;
+  padding-left: 5px;
+}
+
+.adp-device-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.adp-device-name {
+  font-size: 12px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.adp-default-badge {
+  display: inline-block;
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.adp-device-meta {
+  display: block;
+  font-size: 10px;
+  color: #999;
+  margin-top: 1px;
+}
+
+.adp-device-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.adp-active-indicator {
+  font-size: 14px;
+  color: #1565c0;
+  font-weight: 700;
+}
+
+.adp-btn-test {
+  font-size: 10px;
+  padding: 2px 8px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.adp-btn-test:hover {
+  background: #e3f2fd;
+  border-color: #90caf9;
+  color: #1565c0;
+}
+
+.adp-btn-test:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 内联测试结果 ── */
+
+.adp-test-result {
+  font-size: 10px;
+  color: #333;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #f5f5f5;
+}
+
+.adp-testing {
+  font-size: 10px;
+  color: #1565c0;
+  white-space: nowrap;
+  animation: adp-pulse 1s ease-in-out infinite;
+}
+
+@keyframes adp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── 淡入淡出过渡 ── */
+
+.adp-fade-enter-active {
+  transition: opacity 0.2s ease;
+}
+
+.adp-fade-leave-active {
+  transition: opacity 0.6s ease;
+}
+
+.adp-fade-enter-from,
+.adp-fade-leave-to {
+  opacity: 0;
+}
