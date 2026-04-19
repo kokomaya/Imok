@@ -66,6 +66,9 @@ function onReset() {
         title="原文颜色"
       />
     </div>
+    <div class="settings-preview" :style="{ fontSize: settings.originalFontSize + 'px', color: settings.originalColor, fontWeight: settings.fontWeight, fontFamily: settings.fontFamily === 'default' ? 'inherit' : settings.fontFamily }">
+      字幕预览 Subtitle Preview
+    </div>
 
     <div class="settings-row">
       <label class="setting-label">译文</label>
@@ -85,6 +88,9 @@ function onReset() {
         @input="onChange"
         title="译文颜色"
       />
+    </div>
+    <div class="settings-preview" :style="{ fontSize: settings.translationFontSize + 'px', color: settings.translationColor, fontWeight: settings.fontWeight, fontFamily: settings.fontFamily === 'default' ? 'inherit' : settings.fontFamily }">
+      翻译预览 Translation Preview
     </div>
 
     <!-- 行 2：背景、行数、透明度 -->

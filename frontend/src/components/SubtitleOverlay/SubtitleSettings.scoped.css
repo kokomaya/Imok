@@ -8,6 +8,14 @@
   -webkit-app-region: no-drag;
 }
 
+.settings-preview {
+  padding: 2px 0 2px 34px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .settings-row {
   display: flex;
   align-items: center;
