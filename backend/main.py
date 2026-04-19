@@ -481,7 +481,9 @@ async def _run_subprocess(source_type: str) -> None:
 
     async def _stop_pipeline() -> None:
         nonlocal pipeline, summary_coordinator, llm_client, meeting_id, speaker_tracker
-
+        # 没有运行中的资源时，跳过（避免向前端发送无意义的 STOPPING/STOPPED）
+        if pipeline is None and summary_coordinator is None and meeting_id is None:
+            return
         # 立即通知前端“正在停止”，避免 UI 无反馈
         stopped_meeting_id = meeting_id or ""
         writer.write(IPCMessage.status(ProcessState.STOPPING, meeting_id=stopped_meeting_id))
@@ -517,6 +519,16 @@ async def _run_subprocess(source_type: str) -> None:
         summary_coordinator = None
         llm_client = None
         if sc is not None or lc is not None:
+            # 卸载文件存储回调，防止后台任务写入新会议的 meeting_id
+            if sc is not None:
+                sc._segment_callbacks = [
+                    cb for cb in sc._segment_callbacks
+                    if cb is not _on_segment_summary_store
+                ]
+                sc._global_callbacks = [
+                    cb for cb in sc._global_callbacks
+                    if cb is not _on_global_summary_store
+                ]
             asyncio.create_task(_finalize_summary(sc, lc))
 
     def _handle_control(message: IPCMessage) -> None:

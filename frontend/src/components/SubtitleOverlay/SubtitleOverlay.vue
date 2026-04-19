@@ -4,35 +4,37 @@
  *
  * 单一职责：展示最近 N 条双语字幕，支持自动滚动。
  * 数据来源：subtitleStore（由 ipc-bridge 和 llm-client 驱动）。
+ * 外观设置：subtitleSettingsStore（由 SubtitleSettings 面板控制）。
  */
 
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { subtitleStore } from '@/stores/subtitle-store.js';
+import { subtitleSettingsStore } from '@/stores/subtitle-settings-store.js';
 import { ipcBridge } from '@/services/ipc-bridge.js';
 import { llmClient } from '@/services/llm-client.js';
+import SubtitleSettings from './SubtitleSettings.vue';
 
 const listRef = ref(null);
-const isDragging = ref(false);
+const showSettings = ref(false);
+
+const { settings, cssVars } = subtitleSettingsStore;
+
+// 根据设置中的 visibleLines 截取字幕
+const displayEntries = computed(() => {
+  return subtitleStore.state.entries.slice(-settings.visibleLines);
+});
 
 // 自动滚动到底部
-watch(
-  () => subtitleStore.visibleEntries.value,
-  async () => {
-    await nextTick();
-    scrollToBottom();
-  },
-  { deep: true },
-);
+watch(displayEntries, async () => {
+  await nextTick();
+  scrollToBottom();
+}, { deep: true });
 
 function scrollToBottom() {
   if (listRef.value) {
     listRef.value.scrollTop = listRef.value.scrollHeight;
   }
 }
-
-// ---------------------------------------------------------------
-// 拖拽支持（通过 -webkit-app-region 处理标题栏拖拽）
-// ---------------------------------------------------------------
 
 function formatTime(timestamp) {
   return new Date(timestamp).toLocaleTimeString('zh-CN', {
@@ -52,10 +54,59 @@ function getStatusClass(status) {
 }
 
 // ---------------------------------------------------------------
+// 设置持久化（防抖）
+// ---------------------------------------------------------------
+
+let saveTimer = null;
+
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    if (window.electronAPI?.saveOverlaySettings) {
+      window.electronAPI.saveOverlaySettings(subtitleSettingsStore.toJSON());
+    }
+  }, 300);
+}
+
+function onLockToggle(locked) {
+  if (window.electronAPI?.setOverlayClickThrough) {
+    window.electronAPI.setOverlayClickThrough(locked);
+  }
+}
+
+function onSettingsSave() {
+  // 同步 always-on-top 到 Electron
+  if (window.electronAPI?.setOverlayAlwaysOnTop) {
+    window.electronAPI.setOverlayAlwaysOnTop(settings.alwaysOnTop);
+  }
+  scheduleSave();
+}
+
+// ---------------------------------------------------------------
 // 生命周期
 // ---------------------------------------------------------------
 
-onMounted(() => {
+onMounted(async () => {
+  // 加载持久化设置
+  if (window.electronAPI?.getOverlaySettings) {
+    try {
+      const result = await window.electronAPI.getOverlaySettings();
+      if (result.ok && result.settings) {
+        subtitleSettingsStore.loadFrom(result.settings);
+      }
+    } catch (_) {
+      // 使用默认设置
+    }
+  }
+
+  // 同步初始 always-on-top / click-through 状态
+  if (window.electronAPI?.setOverlayAlwaysOnTop) {
+    window.electronAPI.setOverlayAlwaysOnTop(settings.alwaysOnTop);
+  }
+  if (window.electronAPI?.setOverlayClickThrough) {
+    window.electronAPI.setOverlayClickThrough(settings.locked);
+  }
+
   // 初始化 IPC 桥接，当有新转写时触发翻译
   ipcBridge.init({
     onTranscription: (entry) => {
@@ -67,30 +118,46 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (saveTimer) clearTimeout(saveTimer);
   ipcBridge.destroy();
 });
 </script>
 
 <template>
-  <div class="overlay-root" :class="{ dragging: isDragging }">
+  <div class="overlay-root" :style="cssVars">
     <!-- 拖拽条 -->
     <div class="drag-handle" style="-webkit-app-region: drag">
       <span class="drag-label">字幕</span>
+      <div class="drag-actions" style="-webkit-app-region: no-drag">
+        <button
+          class="handle-btn"
+          @click="showSettings = !showSettings"
+          title="设置"
+        >⚙</button>
+      </div>
       <span
         class="status-dot"
         :class="subtitleStore.state.pythonStatus"
       ></span>
     </div>
 
+    <!-- 设置面板 -->
+    <SubtitleSettings
+      v-if="showSettings"
+      @save="onSettingsSave"
+      @lock-toggle="onLockToggle"
+      @close="showSettings = false"
+    />
+
     <!-- 字幕列表 -->
     <div ref="listRef" class="subtitle-list">
       <TransitionGroup name="subtitle">
         <div
-          v-for="entry in subtitleStore.visibleEntries.value"
+          v-for="entry in displayEntries"
           :key="entry.id"
           class="subtitle-entry"
         >
-          <div class="entry-header">
+          <div class="entry-header" v-if="settings.showTimestamp">
             <span class="time">{{ formatTime(entry.timestamp) }}</span>
             <span class="lang-badge" v-if="entry.language">
               {{ entry.language }}
@@ -100,7 +167,7 @@ onUnmounted(() => {
           <div
             class="entry-translation"
             :class="getStatusClass(entry.translationStatus)"
-            v-if="entry.translation || entry.translationStatus === 'translating'"
+            v-if="settings.showTranslation && (entry.translation || entry.translationStatus === 'translating')"
           >
             {{ entry.translation }}
             <span
@@ -109,7 +176,7 @@ onUnmounted(() => {
             >▍</span>
           </div>
           <div
-            v-if="entry.translationStatus === 'error'"
+            v-if="settings.showTranslation && entry.translationStatus === 'error'"
             class="entry-translation error"
           >
             翻译失败
@@ -118,7 +185,7 @@ onUnmounted(() => {
       </TransitionGroup>
 
       <div
-        v-if="subtitleStore.visibleEntries.value.length === 0"
+        v-if="displayEntries.length === 0"
         class="empty-hint"
       >
         等待语音输入…
@@ -132,11 +199,11 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: rgba(20, 20, 20, 0.85);
+  background: rgba(20, 20, 20, var(--subtitle-bg-opacity, 0.85));
   border-radius: 8px;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  color: #e8e8e8;
+  color: var(--subtitle-original-color, #e8e8e8);
   user-select: none;
 }
 
@@ -158,11 +225,35 @@ onUnmounted(() => {
   text-transform: uppercase;
 }
 
+.drag-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.handle-btn {
+  font-size: 13px;
+  padding: 1px 4px;
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.15s;
+  line-height: 1;
+}
+
+.handle-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ddd;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: #666;
+  flex-shrink: 0;
 }
 
 .status-dot.running {
@@ -246,20 +337,22 @@ onUnmounted(() => {
 }
 
 .entry-original {
-  font-size: 14px;
+  font-size: var(--subtitle-original-size, 14px);
+  font-weight: var(--subtitle-font-weight, normal);
   line-height: 1.4;
-  color: #e8e8e8;
+  color: var(--subtitle-original-color, #e8e8e8);
 }
 
 .entry-translation {
-  font-size: 13px;
+  font-size: var(--subtitle-translation-size, 13px);
+  font-weight: var(--subtitle-font-weight, normal);
   line-height: 1.4;
-  color: #90caf9;
+  color: var(--subtitle-translation-color, #90caf9);
   margin-top: 2px;
 }
 
 .entry-translation.translating {
-  color: #90caf9;
+  color: var(--subtitle-translation-color, #90caf9);
 }
 
 .entry-translation.done {
@@ -273,7 +366,7 @@ onUnmounted(() => {
 
 .typing-indicator {
   animation: blink 0.8s infinite;
-  color: #90caf9;
+  color: var(--subtitle-translation-color, #90caf9);
 }
 
 @keyframes blink {

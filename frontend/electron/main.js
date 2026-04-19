@@ -137,6 +137,16 @@ function setupIPC() {
     return { ok: true };
   });
 
+  // 字幕设置持久化
+  ipcMain.handle('overlay:get-settings', () => {
+    return { ok: true, settings: windowManager.loadSettings() };
+  });
+
+  ipcMain.handle('overlay:save-settings', (_event, settings) => {
+    windowManager.saveSettings(settings);
+    return { ok: true };
+  });
+
   // 闭麦面板可见性切换（由快捷键触发，转发到 renderer）
   ipcMain.handle('mute-panel:toggle', () => {
     mainWindow?.webContents.send('mute-panel:toggle');

@@ -83,9 +83,8 @@ async function startMeeting() {
   summaryStore.clearAll();
 
   const source = getSourceType();
-  // 先切换音频源配置，再启动
+  // switch_source 会自动执行 restart（stop + start），无需再发 start
   await window.electronAPI.sendControl('switch_source', { source });
-  await window.electronAPI.sendControl('start');
 }
 
 /**

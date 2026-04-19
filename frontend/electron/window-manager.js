@@ -26,6 +26,12 @@ const BOUNDS_FILE = path.join(
   'subtitle-window-bounds.json',
 );
 
+/** 字幕设置配置文件路径 */
+const SETTINGS_FILE = path.join(
+  require('electron').app.getPath('userData'),
+  'subtitle-settings.json',
+);
+
 /** 默认窗口尺寸 */
 const DEFAULT_BOUNDS = {
   width: 600,
@@ -204,6 +210,37 @@ class WindowManager {
     if (this._overlayWindow && !this._overlayWindow.isDestroyed()) {
       this._overlayWindow.close();
       this._overlayWindow = null;
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // 字幕设置持久化
+  // ---------------------------------------------------------------
+
+  /**
+   * 读取持久化的字幕设置。
+   * @returns {Object} 设置对象（可能为空 {}）
+   */
+  loadSettings() {
+    try {
+      if (fs.existsSync(SETTINGS_FILE)) {
+        return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+      }
+    } catch (_) {
+      // 文件损坏或不可读，返回空对象使用默认值
+    }
+    return {};
+  }
+
+  /**
+   * 持久化字幕设置。
+   * @param {Object} settings
+   */
+  saveSettings(settings) {
+    try {
+      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+    } catch (_) {
+      // 写入失败，静默忽略
     }
   }
 

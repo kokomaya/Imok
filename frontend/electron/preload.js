@@ -26,6 +26,8 @@ const INVOKE_CHANNELS = [
   'overlay:close',
   'overlay:set-click-through',
   'overlay:set-always-on-top',
+  'overlay:get-settings',
+  'overlay:save-settings',
   'mute-panel:toggle',
   'llm:get-config',
   'llm:chat',
@@ -127,6 +129,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   setOverlayAlwaysOnTop: (enabled) => {
     return ipcRenderer.invoke('overlay:set-always-on-top', enabled);
+  },
+
+  /**
+   * 获取字幕悬浮窗设置。
+   * @returns {Promise<{ ok: boolean, settings: Object }>}
+   */
+  getOverlaySettings: () => {
+    return ipcRenderer.invoke('overlay:get-settings');
+  },
+
+  /**
+   * 保存字幕悬浮窗设置。
+   * @param {Object} settings
+   * @returns {Promise<{ ok: boolean }>}
+   */
+  saveOverlaySettings: (settings) => {
+    return ipcRenderer.invoke('overlay:save-settings', settings);
   },
 
   /**
