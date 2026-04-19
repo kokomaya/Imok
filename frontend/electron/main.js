@@ -247,6 +247,79 @@ function setupIPC() {
     }
   });
 
+  // LLM 流式请求代理：通过 SSE 逐块推送到 renderer
+  ipcMain.handle('llm:chat-stream', async (event, { messages, temperature, max_tokens }) => {
+    const { net } = require('electron');
+    const result = loadLLMConfig(BACKEND_ROOT);
+    if (!result.ok) {
+      event.sender.send('llm:chat-stream-error', result.error);
+      return { ok: false, error: result.error };
+    }
+
+    const cfg = result.config;
+    const url = `${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
+      ...(cfg.headers || {}),
+    };
+
+    const body = JSON.stringify({
+      model: cfg.model,
+      messages,
+      stream: true,
+      temperature: temperature ?? 0.3,
+      max_tokens: max_tokens ?? 512,
+    });
+
+    try {
+      const response = await net.fetch(url, { method: 'POST', headers, body });
+      if (!response.ok) {
+        const text = await response.text();
+        const error = `HTTP ${response.status}: ${text}`;
+        event.sender.send('llm:chat-stream-error', error);
+        return { ok: false, error };
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullContent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const payload = trimmed.slice(5).trim();
+          if (payload === '[DONE]') continue;
+
+          try {
+            const json = JSON.parse(payload);
+            const delta = json.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              fullContent += delta;
+              event.sender.send('llm:chat-stream-chunk', delta);
+            }
+          } catch (_) { /* skip malformed SSE lines */ }
+        }
+      }
+
+      event.sender.send('llm:chat-stream-done', fullContent);
+      return { ok: true, content: fullContent };
+    } catch (err) {
+      event.sender.send('llm:chat-stream-error', err.message);
+      return { ok: false, error: err.message };
+    }
+  });
+
   // ── 会议历史管理 ──────────────────────────────────────────
 
   const meetingsDir = path.join(BACKEND_ROOT, 'data', 'meetings');

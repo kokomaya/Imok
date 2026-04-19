@@ -29,6 +29,7 @@ const INVOKE_CHANNELS = [
   'mute-panel:toggle',
   'llm:get-config',
   'llm:chat',
+  'llm:chat-stream',
   'meeting:list',
   'meeting:load',
   'meeting:delete',
@@ -50,6 +51,9 @@ const RECEIVE_CHANNELS = [
   'python:audio-level',
   'mute-panel:toggle',
   'menu:action',
+  'llm:chat-stream-chunk',
+  'llm:chat-stream-done',
+  'llm:chat-stream-error',
 ];
 
 // ---------------------------------------------------------------
@@ -148,6 +152,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   llmChat: (params) => {
     return ipcRenderer.invoke('llm:chat', params);
+  },
+
+  /**
+   * 流式 LLM 请求 — 通过 SSE 逐块接收内容。
+   * @param {{ messages: Array, temperature?: number, max_tokens?: number }} params
+   * @param {{ onChunk?: (delta: string) => void, onDone?: (full: string) => void, onError?: (err: string) => void }} callbacks
+   * @returns {Promise<{ ok: boolean, content?: string, error?: string }>}
+   */
+  llmChatStream: (params, callbacks = {}) => {
+    const chunkHandler = (_e, delta) => callbacks.onChunk?.(delta);
+    const doneHandler = (_e, full) => callbacks.onDone?.(full);
+    const errorHandler = (_e, err) => callbacks.onError?.(err);
+
+    ipcRenderer.on('llm:chat-stream-chunk', chunkHandler);
+    ipcRenderer.on('llm:chat-stream-done', doneHandler);
+    ipcRenderer.on('llm:chat-stream-error', errorHandler);
+
+    const cleanup = () => {
+      ipcRenderer.removeListener('llm:chat-stream-chunk', chunkHandler);
+      ipcRenderer.removeListener('llm:chat-stream-done', doneHandler);
+      ipcRenderer.removeListener('llm:chat-stream-error', errorHandler);
+    };
+
+    return ipcRenderer.invoke('llm:chat-stream', params).finally(cleanup);
   },
 
   /**

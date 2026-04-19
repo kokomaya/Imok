@@ -46,16 +46,42 @@ function parseActionItem(item) {
   return { description: desc, assignee, deadline: '', status: 'open' };
 }
 
+// ── 流式 / 非流式自适应调用 ──
+
+/**
+ * 调用 LLM，优先使用流式接口（实时显示生成文本），不支持时回退到非流式。
+ * @param {{ messages: Array, temperature?: number, max_tokens?: number }} params
+ * @returns {Promise<{ ok: boolean, content?: string, error?: string }>}
+ */
+async function _chatWithStreaming(params) {
+  if (window.electronAPI?.llmChatStream) {
+    summaryStore.startGenerating();
+    try {
+      const result = await window.electronAPI.llmChatStream(params, {
+        onChunk: (delta) => summaryStore.appendGeneratingChunk(delta),
+      });
+      return result;
+    } finally {
+      summaryStore.stopGenerating();
+    }
+  }
+  // 回退：非流式
+  if (window.electronAPI?.llmChat) {
+    return window.electronAPI.llmChat(params);
+  }
+  return { ok: false, error: 'No LLM API available' };
+}
+
 // ── 回看模式：通过 llm:chat 生成摘要 ──
 
 export async function generateReviewSummary() {
   const trans = summaryStore.state.reviewTranscriptions;
-  if (!trans.length || !window.electronAPI?.llmChat) return;
+  if (!trans.length) return;
 
   const textBlock = trans.map((t) => t.text).join('\n');
   if (!textBlock.trim()) return;
 
-  const result = await window.electronAPI.llmChat({
+  const result = await _chatWithStreaming({
     messages: [
       { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
       { role: 'user', content: `请对以下会议内容进行摘要：\n\n${textBlock}` },
@@ -81,7 +107,6 @@ export async function generateReviewSummary() {
 export async function generateReviewGlobalSummary() {
   const trans = summaryStore.state.reviewTranscriptions;
   const segments = summaryStore.state.segments;
-  if (!window.electronAPI?.llmChat) return;
 
   if (segments.length === 0 && trans.length > 0) {
     await generateReviewSummary();
@@ -90,7 +115,7 @@ export async function generateReviewGlobalSummary() {
   if (summaryStore.state.segments.length === 0) return;
 
   const segTexts = summaryStore.state.segments.map((s) => s.rawText).join('\n\n---\n\n');
-  const result = await window.electronAPI.llmChat({
+  const result = await _chatWithStreaming({
     messages: [
       { role: 'system', content: MERGE_SYSTEM_PROMPT },
       {
@@ -119,12 +144,12 @@ export async function generateReviewGlobalSummary() {
 
 export async function generateLiveSegmentSummary() {
   const trans = summaryStore.state.liveTranscriptions;
-  if (!trans.length || !window.electronAPI?.llmChat) return;
+  if (!trans.length) return;
 
   const textBlock = trans.map((t) => t.text).join('\n');
   if (!textBlock.trim()) return;
 
-  const result = await window.electronAPI.llmChat({
+  const result = await _chatWithStreaming({
     messages: [
       { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
       { role: 'user', content: `请对以下会议内容进行摘要：\n\n${textBlock}` },
@@ -152,10 +177,9 @@ export async function generateLiveGlobalSummary() {
     await generateLiveSegmentSummary();
   }
   if (summaryStore.state.segments.length === 0) return;
-  if (!window.electronAPI?.llmChat) return;
 
   const segTexts = summaryStore.state.segments.map((s) => s.rawText).join('\n\n---\n\n');
-  const result = await window.electronAPI.llmChat({
+  const result = await _chatWithStreaming({
     messages: [
       { role: 'system', content: MERGE_SYSTEM_PROMPT },
       { role: 'user', content: `请将以下段落摘要合并为一份全局会议总结：\n\n${segTexts}` },

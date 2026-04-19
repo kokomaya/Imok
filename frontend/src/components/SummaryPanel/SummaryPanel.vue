@@ -302,8 +302,13 @@ function formatUpdatedTime(segment) {
           </li>
         </ul>
       </div>
+      <!-- 流式生成中 -->
+      <div v-if="triggeringSegment && summaryStore.state.generatingText" class="section generating-section">
+        <div class="section-label">生成中…</div>
+        <div class="generating-text">{{ summaryStore.state.generatingText }}<span class="cursor-blink">▍</span></div>
+      </div>
       <!-- 空状态 -->
-      <div v-if="!hasContent" class="empty-state">
+      <div v-if="!hasContent && !triggeringSegment" class="empty-state">
         <div class="empty-icon">📝</div>
         <div class="empty-text">点击上方按钮生成段落摘要</div>
       </div>
@@ -321,8 +326,13 @@ function formatUpdatedTime(segment) {
           {{ triggeringGlobal ? '⏳ 生成中…' : '▶ 生成全局总结' }}
         </button>
       </div>
+      <!-- 流式生成中 -->
+      <div v-if="triggeringGlobal && summaryStore.state.generatingText" class="section generating-section">
+        <div class="section-label">生成中…</div>
+        <div class="generating-text">{{ summaryStore.state.generatingText }}<span class="cursor-blink">▍</span></div>
+      </div>
       <!-- 全局摘要 -->
-      <div v-if="globalRawText" class="section">
+      <div v-if="globalRawText && !triggeringGlobal" class="section">
         <div class="section-label">
           全局总结
           <span v-if="globalStats" class="section-meta">
@@ -332,7 +342,7 @@ function formatUpdatedTime(segment) {
         <div class="global-summary-text">{{ globalRawText }}</div>
       </div>
       <!-- 空状态 -->
-      <div v-if="!globalRawText" class="empty-state">
+      <div v-if="!globalRawText && !triggeringGlobal" class="empty-state">
         <div class="empty-icon">📊</div>
         <div class="empty-text">点击上方按钮生成全局会议总结</div>
       </div>
@@ -673,6 +683,38 @@ function formatUpdatedTime(segment) {
   padding: 8px 10px;
   max-height: 150px;
   overflow-y: auto;
+}
+
+/* ── 流式生成中 ── */
+.generating-section {
+  animation: fadeIn 0.2s ease-in;
+}
+
+.generating-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #555;
+  white-space: pre-wrap;
+  background: #f8f9fa;
+  border: 1px dashed #c0c6cc;
+  border-radius: 6px;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.cursor-blink {
+  animation: blink 0.8s step-end infinite;
+  color: #1976d2;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ── 结论列表 ── */

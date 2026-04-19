@@ -53,6 +53,9 @@ const state = reactive({
   /** 总结模块是否正在处理 */
   processing: false,
 
+  /** 流式生成中的文本（逐 chunk 拼接，生成完成后清空） */
+  generatingText: '',
+
   /** 面板是否可见 */
   visible: false,
 
@@ -160,12 +163,38 @@ function updateGlobalSummary(data) {
 function clearAll() {
   state.segments.splice(0, state.segments.length);
   state.globalSummary = null;
+  state.processing = false;
+  state.generatingText = '';
   state.reviewMode = false;
   state.reviewMeetingId = '';
   state.liveMeetingId = '';
   state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length);
   state.liveTranscriptions.splice(0, state.liveTranscriptions.length);
   _savedHash = '';
+}
+
+/**
+ * 开始流式生成（清空暂存文本，设置 processing）。
+ */
+function startGenerating() {
+  state.processing = true;
+  state.generatingText = '';
+}
+
+/**
+ * 追加一段流式 delta 文本。
+ * @param {string} delta
+ */
+function appendGeneratingChunk(delta) {
+  state.generatingText += delta;
+}
+
+/**
+ * 结束流式生成。
+ */
+function stopGenerating() {
+  state.processing = false;
+  state.generatingText = '';
 }
 
 /**
@@ -287,4 +316,7 @@ export const summaryStore = {
   addLiveTranscription,
   markSaved,
   getSummariesForSave,
+  startGenerating,
+  appendGeneratingChunk,
+  stopGenerating,
 };
