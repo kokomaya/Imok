@@ -371,7 +371,16 @@ async def _run_subprocess(source_type: str) -> None:
                 from backend.speaker.embedder import SpeakerEmbedder
                 from backend.speaker.tracker import SpeakerTracker
                 speaker_embedder = SpeakerEmbedder()
-                speaker_tracker = SpeakerTracker()
+                # 继续会议时恢复上次的说话人档案
+                if resume_meeting_id:
+                    saved = meeting_store.load_speakers(resume_meeting_id)
+                    if saved and saved.get("speakers"):
+                        speaker_tracker = SpeakerTracker.from_dict(saved)
+                        logger.info("Restored %d speaker profiles from previous meeting.", len(saved["speakers"]))
+                    else:
+                        speaker_tracker = SpeakerTracker()
+                else:
+                    speaker_tracker = SpeakerTracker()
                 logger.info("Speaker diarization enabled.")
             except Exception:
                 logger.warning("Speaker diarization unavailable, continuing without.", exc_info=True)
