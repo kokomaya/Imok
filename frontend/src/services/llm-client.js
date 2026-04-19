@@ -10,6 +10,7 @@
  */
 
 import { subtitleStore } from '@/stores/subtitle-store.js';
+import { TRANSLATION_PROMPT } from '@/prompts/index.js';
 
 // ---------------------------------------------------------------
 // 配置
@@ -27,17 +28,6 @@ let config = null;
  * @property {number} [timeout=30000] - 超时毫秒
  * @property {boolean} [sslVerify=true] - 是否验证 SSL（仅 Node 环境有效）
  */
-
-/** 翻译 prompt 模板 */
-const TRANSLATION_PROMPT = `你是实时会议翻译系统，请将以下内容翻译为{targetLang}：
-要求：
-- 保留技术术语
-- 简洁自然
-- 不添加解释
-- 仅输出翻译结果
-
-输入：
-{text}`;
 
 /**
  * 初始化 LLM 客户端配置。

@@ -6,56 +6,7 @@
  */
 
 import { summaryStore } from '@/stores/summary-store.js';
-
-// ── LLM Prompts（与 backend/llm/prompt_manager.py 保持一致）──
-
-const SUMMARY_SYSTEM_PROMPT = `你是一个专业的会议记录助手。你的任务是对会议转写文本进行结构化摘要。
-
-要求：
-1. 提取讨论主题和关键结论
-2. 识别 Action Items（含责任人和截止时间，如有提及）
-3. 标注重要的技术决策和风险项
-4. 使用简洁的条目式输出
-
-严格按照以下格式输出（使用 - 列表，不要使用表格）：
-
-## 主题
-- 主题1
-- 主题2
-
-## 结论
-- 结论1
-- 结论2
-
-## Action Items
-- 责任人：任务描述（截止时间）
-- 责任人：任务描述
-
-## 风险
-- 风险1`;
-
-const MERGE_SYSTEM_PROMPT = `你是一个专业的会议记录助手。你的任务是将多个段落摘要合并为一份结构化的全局会议总结。
-
-要求：
-1. 合并相同主题，去除重复内容
-2. 按讨论顺序组织内容
-3. 保留所有 Action Items，不要遗漏
-
-严格按照以下格式输出（使用 - 列表，不要使用表格）：
-
-## 主题
-- 主题1
-- 主题2
-
-## 结论
-- 结论1
-- 结论2
-
-## Action Items
-- 责任人：任务描述（截止时间）
-
-## 风险
-- 风险1`;
+import { SUMMARY_SYSTEM_PROMPT, MERGE_SYSTEM_PROMPT } from '@/prompts/index.js';
 
 // ── 解析 LLM 输出 ──
 
