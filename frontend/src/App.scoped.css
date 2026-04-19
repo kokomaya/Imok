@@ -73,6 +73,20 @@
   background: #c62828;
 }
 
+.btn-new {
+  background: #1e88e5;
+  color: #fff;
+}
+
+.btn-new:hover:not(:disabled) {
+  background: #1565c0;
+}
+
+.btn-new:disabled {
+  background: #90caf9;
+  cursor: not-allowed;
+}
+
 /* ── 音频源开关 ── */
 
 .audio-toggle {

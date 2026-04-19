@@ -23,6 +23,7 @@ const micEnabled = ref(true);
 // ── 会议控制 ──
 const meetingActive = ref(false);
 const meetingStopping = ref(false);
+const lastMeetingInfo = ref(null);
 
 // ── 错误通知 ──
 const errorMessage = ref('');
@@ -69,22 +70,97 @@ function getSourceType() {
 }
 
 /**
- * 开始会议 — 启动音频采集和 ASR。
+ * 启动时自动加载上次有内容的会议记录到 UI。
  */
-async function startMeeting() {
+async function autoLoadLastMeeting() {
+  if (!window.electronAPI) return;
+  try {
+    const result = await window.electronAPI.listMeetings();
+    if (!result.ok || !result.meetings?.length) return;
+    const last = result.meetings[0];
+    if (last.transcription_count <= 0) return;
+
+    const loadResult = await window.electronAPI.loadMeeting(last.meeting_id);
+    if (!loadResult.ok) return;
+
+    const { transcriptions: trans, summaries } = loadResult.data;
+    transcriptions.value = (trans || []).map((t, i) => ({
+      id: i + 1,
+      text: t.text,
+      language: t.language || '',
+      speaker: t.speaker || '',
+      source: t.source || '',
+      timestamp: t.timestamp
+        ? new Date(t.timestamp * 1000).toLocaleTimeString()
+        : '',
+    }));
+
+    summaryStore.clearAll();
+    if (summaries?.segments) {
+      for (const seg of summaries.segments) {
+        summaryStore.addSegmentSummary(seg);
+      }
+    }
+    if (summaries?.global_summary) {
+      summaryStore.updateGlobalSummary({
+        ...summaries.global_summary,
+        action_items: summaries.action_items || [],
+      });
+    }
+    summaryStore.markSaved();
+    lastMeetingInfo.value = last;
+  } catch (err) {
+    console.error('[App] Failed to auto-load last meeting:', err);
+  }
+}
+
+/**
+ * 开始会议 — 如果已加载上次数据走继续/新建分支，否则直接新建。
+ */
+function startMeeting() {
   if (!window.electronAPI || meetingActive.value) return;
-  // 至少启用一个音频源
   if (!systemAudioEnabled.value && !micEnabled.value) {
     showError('请至少启用一个音频源（系统音频或麦克风）');
     return;
   }
-  // 清空上一次会议的残留数据，避免新旧数据混合
+  doStartNewMeeting();
+}
+
+/**
+ * 开始全新会议 — 清空上次数据并启动。
+ */
+async function doStartNewMeeting() {
+  if (!systemAudioEnabled.value && !micEnabled.value) {
+    showError('请至少启用一个音频源（系统音频或麦克风）');
+    return;
+  }
+  lastMeetingInfo.value = null;
   transcriptions.value = [];
   summaryStore.clearAll();
+  loadedMeetingId.value = null;
 
   const source = getSourceType();
-  // switch_source 会自动执行 restart（stop + start），无需再发 start
   await window.electronAPI.sendControl('switch_source', { source });
+}
+
+/**
+ * 继续上次会议 — 数据已在 UI 中，直接传递 meeting_id 给后端启动。
+ */
+async function doContinueMeeting() {
+  const mid = lastMeetingInfo.value?.meeting_id;
+  lastMeetingInfo.value = null;
+
+  if (!mid || !window.electronAPI) {
+    doStartNewMeeting();
+    return;
+  }
+  if (!systemAudioEnabled.value && !micEnabled.value) {
+    showError('请至少启用一个音频源（系统音频或麦克风）');
+    return;
+  }
+  loadedMeetingId.value = null;
+  const source = getSourceType();
+  await window.electronAPI.sendControl('switch_source', { source, meeting_id: mid });
 }
 
 /**
@@ -183,7 +259,7 @@ function handleMenuAction(action, data) {
 }
 
 const ipcListeners = useIPCListeners({
-  status, meetingActive, meetingStopping, transcriptions,
+  status, meetingActive, meetingStopping, lastMeetingInfo, transcriptions,
   showError, handleMenuAction, syncAudioStateToMenu,
 });
 
@@ -191,6 +267,7 @@ onMounted(async () => {
   if (currentRoute.value !== 'main') return;
   window.addEventListener('beforeunload', onBeforeUnload);
   await ipcListeners.setup();
+  await autoLoadLastMeeting();
 });
 
 onUnmounted(() => {
@@ -233,8 +310,26 @@ function onEditTranscription(item, event) {
       <h1 class="title">Imok</h1>
       <div class="header-actions">
         <!-- 会议开始/停止按钮 -->
+        <template v-if="!meetingActive && lastMeetingInfo">
+          <button
+            class="btn-meeting btn-start"
+            @click="doContinueMeeting"
+            :disabled="status === 'loading'"
+            title="继续上次会议"
+          >
+            ▶ 继续会议
+          </button>
+          <button
+            class="btn-meeting btn-new"
+            @click="doStartNewMeeting"
+            :disabled="status === 'loading'"
+            title="开始新会议"
+          >
+            ✦ 新会议
+          </button>
+        </template>
         <button
-          v-if="!meetingActive"
+          v-else-if="!meetingActive"
           class="btn-meeting btn-start"
           @click="startMeeting"
           :disabled="status === 'loading'"
@@ -356,6 +451,7 @@ function onEditTranscription(item, event) {
         </div>
       </section>
     </main>
+
   </div>
 </template>
 

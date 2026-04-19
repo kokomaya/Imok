@@ -349,7 +349,7 @@ async def _run_subprocess(source_type: str) -> None:
         except Exception:
             logger.exception("Failed to store global summary")
 
-    async def _start_pipeline(src_type: str) -> MeetingPipeline:
+    async def _start_pipeline(src_type: str, *, resume_meeting_id: str = "") -> MeetingPipeline:
         """创建并启动 Pipeline + SummaryCoordinator。
 
         当 src_type == 'both' 时，为每个音频源创建独立的 VAD 实例，
@@ -421,13 +421,17 @@ async def _run_subprocess(source_type: str) -> None:
 
             pl.on_audio_level(_on_audio_level)
 
-            # 初始化存储（创建会议文件夹）
+            # 初始化存储（创建新会议或恢复已有会议）
             try:
-                meeting_id = meeting_store.create_meeting(
-                    title="", audio_source=src_type
-                )
+                if resume_meeting_id:
+                    meeting_id = meeting_store.resume_meeting(resume_meeting_id)
+                    logger.info("Resuming meeting: %s", meeting_id)
+                else:
+                    meeting_id = meeting_store.create_meeting(
+                        title="", audio_source=src_type
+                    )
+                    logger.info("Meeting storage initialized: %s", meeting_id)
                 pl.on_transcription(_on_transcription_store)
-                logger.info("Meeting storage initialized: %s", meeting_id)
             except Exception:
                 logger.exception("Failed to initialize meeting storage, continuing without persistence")
                 meeting_id = None
@@ -544,7 +548,10 @@ async def _run_subprocess(source_type: str) -> None:
             new_source = message.data.get("source", "")
             if new_source in ("wasapi", "mic", "both"):
                 current_source_type = new_source
-                asyncio.run_coroutine_threadsafe(_do_restart(new_source), main_loop)
+                resume_mid = message.data.get("meeting_id", "")
+                asyncio.run_coroutine_threadsafe(
+                    _do_restart(new_source, resume_meeting_id=resume_mid), main_loop
+                )
             else:
                 writer.write(
                     IPCMessage.error("invalid_source", f"Unknown source: {new_source}")
@@ -587,12 +594,12 @@ async def _run_subprocess(source_type: str) -> None:
         async with _pipeline_lock:
             await _stop_pipeline()
 
-    async def _do_restart(new_source: str) -> None:
+    async def _do_restart(new_source: str, *, resume_meeting_id: str = "") -> None:
         nonlocal pipeline
         async with _pipeline_lock:
             await _stop_pipeline()
             try:
-                pipeline = await _start_pipeline(new_source)
+                pipeline = await _start_pipeline(new_source, resume_meeting_id=resume_meeting_id)
             except Exception:
                 pass
 

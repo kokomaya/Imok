@@ -13,12 +13,13 @@ import { expressionService } from '@/services/expression-service.js';
  * @param {import('vue').Ref<string>} deps.status
  * @param {import('vue').Ref<boolean>} deps.meetingActive
  * @param {import('vue').Ref<boolean>} deps.meetingStopping
+ * @param {import('vue').Ref<Object|null>} deps.lastMeetingInfo
  * @param {import('vue').Ref<Array>} deps.transcriptions
  * @param {Function} deps.showError
  * @param {Function} deps.handleMenuAction
  * @param {Function} deps.syncAudioStateToMenu
  */
-export function useIPCListeners({ status, meetingActive, meetingStopping, transcriptions, showError, handleMenuAction, syncAudioStateToMenu }) {
+export function useIPCListeners({ status, meetingActive, meetingStopping, lastMeetingInfo, transcriptions, showError, handleMenuAction, syncAudioStateToMenu }) {
 
   const cleanupFns = [];
 
@@ -58,6 +59,15 @@ export function useIPCListeners({ status, meetingActive, meetingStopping, transc
             }
           }
           summaryStore.setLiveMeetingId('');
+
+          // 会议结束后设置上次会议信息，显示“继续/新建”按钮
+          if (transcriptions.value.length > 0) {
+            lastMeetingInfo.value = {
+              meeting_id: mid,
+              transcription_count: transcriptions.value.length,
+              has_summary: summaryStore.hasSummaryContent.value,
+            };
+          }
         }
       }),
     );

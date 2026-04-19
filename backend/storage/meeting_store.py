@@ -80,6 +80,19 @@ class MeetingStore:
         _write_json(meeting_dir / _META_FILE, meta.to_dict())
         logger.info("Finished meeting: %s", meeting_id)
 
+    def resume_meeting(self, meeting_id: str) -> str:
+        """重新打开已结束的会议，继续录制。
+
+        返回 meeting_id（与传入值相同）。
+        """
+        meeting_dir = self._meeting_dir(meeting_id)
+        meta = self._read_meta(meeting_dir)
+        meta.status = MeetingStatus.RUNNING
+        meta.ended_at = None
+        _write_json(meeting_dir / _META_FILE, meta.to_dict())
+        logger.info("Resumed meeting: %s", meeting_id)
+        return meeting_id
+
     # ── 写入 ──────────────────────────────────────────────────
 
     def append_transcription(
