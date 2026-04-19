@@ -12,12 +12,13 @@ import { expressionService } from '@/services/expression-service.js';
  * @param {Object} deps
  * @param {import('vue').Ref<string>} deps.status
  * @param {import('vue').Ref<boolean>} deps.meetingActive
+ * @param {import('vue').Ref<boolean>} deps.meetingStopping
  * @param {import('vue').Ref<Array>} deps.transcriptions
  * @param {Function} deps.showError
  * @param {Function} deps.handleMenuAction
  * @param {Function} deps.syncAudioStateToMenu
  */
-export function useIPCListeners({ status, meetingActive, transcriptions, showError, handleMenuAction, syncAudioStateToMenu }) {
+export function useIPCListeners({ status, meetingActive, meetingStopping, transcriptions, showError, handleMenuAction, syncAudioStateToMenu }) {
 
   const cleanupFns = [];
 
@@ -31,7 +32,15 @@ export function useIPCListeners({ status, meetingActive, transcriptions, showErr
       window.electronAPI.on('python:status', async (data) => {
         const prevActive = meetingActive.value;
         status.value = data.state || 'unknown';
-        meetingActive.value = data.state === 'running';
+        meetingActive.value = data.state === 'running' || data.state === 'stopping';
+
+        if (data.state === 'stopping') {
+          meetingStopping.value = true;
+        }
+
+        if (data.state === 'stopped') {
+          meetingStopping.value = false;
+        }
 
         if (data.state === 'running' && data.meeting_id) {
           summaryStore.setLiveMeetingId(data.meeting_id);

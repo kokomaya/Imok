@@ -468,6 +468,16 @@ async def _run_subprocess(source_type: str) -> None:
     async def _stop_pipeline() -> None:
         nonlocal pipeline, summary_coordinator, llm_client, meeting_id, speaker_tracker
 
+        # 立即通知前端“正在停止”，避免 UI 无反馈
+        stopped_meeting_id = meeting_id or ""
+        writer.write(IPCMessage.status(ProcessState.STOPPING, meeting_id=stopped_meeting_id))
+
+        # 优先停止音频采集（快，<1s），让用户看到录音已停
+        if pipeline is not None:
+            await pipeline.stop()
+            pipeline = None
+
+        # 然后停止摘要协调器（可能慢，涉及 LLM 调用）
         if summary_coordinator is not None:
             try:
                 await summary_coordinator.stop()
@@ -482,12 +492,7 @@ async def _run_subprocess(source_type: str) -> None:
                 logger.exception("Error closing LLM client")
             llm_client = None
 
-        if pipeline is not None:
-            await pipeline.stop()
-            pipeline = None
-
-        # 发送 STOPPED 状态（携带 meeting_id 供前端保存摘要）
-        stopped_meeting_id = meeting_id or ""
+        # 通知前端：完全停止
         writer.write(IPCMessage.status(ProcessState.STOPPED, meeting_id=stopped_meeting_id))
 
         # 持久化说话人跟踪状态

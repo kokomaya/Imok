@@ -22,6 +22,7 @@ const micEnabled = ref(true);
 
 // ── 会议控制 ──
 const meetingActive = ref(false);
+const meetingStopping = ref(false);
 
 // ── 错误通知 ──
 const errorMessage = ref('');
@@ -91,7 +92,8 @@ async function startMeeting() {
  * 停止会议 — 停止采集。
  */
 async function stopMeeting() {
-  if (!window.electronAPI || !meetingActive.value) return;
+  if (!window.electronAPI || !meetingActive.value || meetingStopping.value) return;
+  meetingStopping.value = true;
   await window.electronAPI.sendControl('stop');
 }
 
@@ -182,7 +184,7 @@ function handleMenuAction(action, data) {
 }
 
 const ipcListeners = useIPCListeners({
-  status, meetingActive, transcriptions,
+  status, meetingActive, meetingStopping, transcriptions,
   showError, handleMenuAction, syncAudioStateToMenu,
 });
 
@@ -245,9 +247,10 @@ function onEditTranscription(item, event) {
           v-else
           class="btn-meeting btn-stop"
           @click="stopMeeting"
+          :disabled="meetingStopping"
           title="停止会议录制"
         >
-          ⏹ 停止
+          {{ meetingStopping ? '⏳ 停止中…' : '⏹ 停止' }}
         </button>
 
         <!-- 音频源独立开关 -->

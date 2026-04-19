@@ -39,6 +39,7 @@ class ProcessState(str, Enum):
     READY = "ready"  # 初始化完成，等待启动命令
     LOADING = "loading"  # 加载模型中
     RUNNING = "running"  # 正在采集和识别
+    STOPPING = "stopping"  # 正在停止（等待清理完成）
     STOPPED = "stopped"  # 已停止
     ERROR = "error"  # 发生错误
 
