@@ -9,6 +9,8 @@ import { HistoryPanel } from '@/components/HistoryPanel';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
 import { summaryStore } from '@/stores/summary-store.js';
 import { workspaceStore } from '@/stores/workspace-store.js';
+import { sceneStore } from '@/stores/scene-store.js';
+import { expressionSettingsStore } from '@/stores/expression-settings-store.js';
 import { useMeetingHistory } from '@/composables/useMeetingHistory.js';
 import { useIPCListeners } from '@/composables/useIPCListeners.js';
 
@@ -273,6 +275,8 @@ onMounted(async () => {
   window.addEventListener('beforeunload', onBeforeUnload);
   await ipcListeners.setup();
   await autoLoadLastMeeting();
+  sceneStore.load();
+  expressionSettingsStore.load();
 });
 
 onUnmounted(() => {

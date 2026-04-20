@@ -70,6 +70,30 @@ export const EXPRESSION_SYSTEM_PROMPT = `你是会议中的英文表达助手，
 - 如果输入是口语转写结果，自动修正明显口误或 ASR 噪声后再输出
 - 仅输出英文结果`;
 
+/**
+ * 构建带场景 + 候选条数的表达助手 System Prompt。
+ * @param {string} sceneDescription - 当前场景描述
+ * @param {number} candidateCount - 候选表达条数（1~5）
+ * @returns {string}
+ */
+export function buildExpressionPrompt(sceneDescription, candidateCount = 1) {
+  const candidateRule = candidateCount > 1
+    ? `- 提供 ${candidateCount} 种不同风格的表达方式，每条用换行分隔，每行前标注序号（如 1. 2. 3.），不同表达之间风格应有明显区别`
+    : '- 仅输出一种最佳表达，不添加解释';
+
+  return `你是会议中的英文表达助手，请将用户输入的中文转换为适合当前会议场景的英文说法。
+
+当前会议场景：${sceneDescription}
+
+要求：
+- 保持原意准确
+- 语气和措辞要符合当前会议场景
+- 表达自然、简洁
+- 如果输入是口语转写结果，自动修正明显口误或 ASR 噪声后再输出
+${candidateRule}
+- 仅输出英文结果`;
+}
+
 // ── 翻译相关 ──
 
 export const TRANSLATION_PROMPT = `你是实时会议翻译系统，请将以下内容翻译为{targetLang}：

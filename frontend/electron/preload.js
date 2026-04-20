@@ -38,6 +38,10 @@ const INVOKE_CHANNELS = [
   'meeting:save-summaries',
   'audio:list-devices',
   'audio:test-device',
+  'scenes:list',
+  'scenes:save',
+  'expression-settings:get',
+  'expression-settings:save',
 ];
 
 /** 允许从 main 发往 renderer 的 on 通道 */
@@ -232,6 +236,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   saveMeetingSummaries: (meetingId, summaries) => {
     return ipcRenderer.invoke('meeting:save-summaries', meetingId, summaries);
+  },
+
+  // ── 场景管理 ──
+
+  listScenes: () => {
+    return ipcRenderer.invoke('scenes:list');
+  },
+
+  saveScenes: (scenes) => {
+    return ipcRenderer.invoke('scenes:save', scenes);
+  },
+
+  // ── 表达设置 ──
+
+  getExpressionSettings: () => {
+    return ipcRenderer.invoke('expression-settings:get');
+  },
+
+  saveExpressionSettings: (settings) => {
+    return ipcRenderer.invoke('expression-settings:save', settings);
   },
 
   /**

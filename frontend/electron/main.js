@@ -536,6 +536,58 @@ function setupIPC() {
       return { ok: false, error: err.message };
     }
   });
+
+  // ── 场景管理（独立于会议，全局持久化）───────────────────────
+
+  const scenesPath = path.join(BACKEND_ROOT, 'config', 'scenes.json');
+
+  ipcMain.handle('scenes:list', () => {
+    try {
+      if (!fs.existsSync(scenesPath)) return { ok: true, scenes: [] };
+      const data = JSON.parse(fs.readFileSync(scenesPath, 'utf-8'));
+      return { ok: true, scenes: data.scenes || [] };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('scenes:save', (_event, scenes) => {
+    try {
+      if (!Array.isArray(scenes)) return { ok: false, error: 'Invalid scenes data' };
+      const tmpPath = scenesPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify({ scenes }, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, scenesPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // ── 表达设置（候选条数等，全局持久化）─────────────────────
+
+  const exprSettingsPath = path.join(BACKEND_ROOT, 'config', 'expression_settings.json');
+
+  ipcMain.handle('expression-settings:get', () => {
+    try {
+      if (!fs.existsSync(exprSettingsPath)) return { ok: true, settings: {} };
+      const data = JSON.parse(fs.readFileSync(exprSettingsPath, 'utf-8'));
+      return { ok: true, settings: data };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('expression-settings:save', (_event, settings) => {
+    try {
+      if (!settings || typeof settings !== 'object') return { ok: false, error: 'Invalid settings' };
+      const tmpPath = exprSettingsPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(settings, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, exprSettingsPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 }
 
 // ---------------------------------------------------------------

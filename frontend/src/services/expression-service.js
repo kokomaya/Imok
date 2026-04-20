@@ -8,7 +8,9 @@
  */
 
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
-import { EXPRESSION_SYSTEM_PROMPT } from '@/prompts/index.js';
+import { sceneStore } from '@/stores/scene-store.js';
+import { expressionSettingsStore } from '@/stores/expression-settings-store.js';
+import { buildExpressionPrompt, EXPRESSION_SYSTEM_PROMPT } from '@/prompts/index.js';
 
 // ---------------------------------------------------------------
 // 配置
@@ -47,13 +49,20 @@ async function express(inputText) {
   const id = muteAssistStore.startExpression(text);
 
   try {
+    // 动态构建 prompt：注入场景描述 + 候选条数
+    const scene = sceneStore.activeScene.value;
+    const candidateCount = expressionSettingsStore.state.candidateCount;
+    const systemPrompt = scene
+      ? buildExpressionPrompt(scene.description, candidateCount)
+      : EXPRESSION_SYSTEM_PROMPT;
+
     const result = await window.electronAPI.llmChat({
       messages: [
-        { role: 'system', content: EXPRESSION_SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: text },
       ],
-      temperature: 0.3,
-      max_tokens: 512,
+      temperature: candidateCount > 1 ? 0.7 : 0.3,
+      max_tokens: candidateCount > 1 ? 1024 : 512,
     });
 
     if (!result.ok) {

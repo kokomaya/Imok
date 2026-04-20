@@ -8,11 +8,14 @@
 
 import { ref, watch, nextTick, computed } from 'vue';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
+import { sceneStore } from '@/stores/scene-store.js';
 import { expressionService } from '@/services/expression-service.js';
+import SceneManager from './SceneManager.vue';
 
 const inputRef = ref(null);
 const outputRef = ref(null);
 const localInput = ref('');
+const showSceneManager = ref(false);
 
 const store = muteAssistStore;
 
@@ -56,6 +59,19 @@ async function handleCopy() {
   } catch (err) {
     console.error('[MuteAssistPanel] Copy failed:', err);
   }
+}
+
+async function handleCopyCandidate(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    store.markCopied();
+  } catch (err) {
+    console.error('[MuteAssistPanel] Copy candidate failed:', err);
+  }
+}
+
+function onSceneChange(e) {
+  sceneStore.setActive(e.target.value);
 }
 
 function handleClear() {
@@ -110,6 +126,10 @@ const micButtonClass = computed(() => {
 });
 
 const showHistory = computed(() => store.state.history.length > 0);
+
+const hasCandidates = computed(() => store.state.candidates.length > 1);
+const scenes = computed(() => sceneStore.state.scenes);
+const activeSceneId = computed(() => sceneStore.state.activeSceneId);
 </script>
 
 <template>
@@ -117,23 +137,42 @@ const showHistory = computed(() => store.state.history.length > 0);
     <!-- 标题栏 -->
     <div class="panel-header">
       <span class="panel-title">闭麦表达助手</span>
-      <div class="mode-switch">
+      <div class="header-right">
+        <div class="mode-switch">
+          <button
+            class="mode-btn"
+            :class="{ active: store.state.inputMode === 'keyboard' }"
+            @click="switchMode('keyboard')"
+          >
+            ⌨️ 键盘
+          </button>
+          <button
+            class="mode-btn"
+            :class="{ active: store.state.inputMode === 'mic' }"
+            @click="switchMode('mic')"
+          >
+            🎤 麦克风
+          </button>
+        </div>
         <button
-          class="mode-btn"
-          :class="{ active: store.state.inputMode === 'keyboard' }"
-          @click="switchMode('keyboard')"
-        >
-          ⌨️ 键盘
-        </button>
-        <button
-          class="mode-btn"
-          :class="{ active: store.state.inputMode === 'mic' }"
-          @click="switchMode('mic')"
-        >
-          🎤 麦克风
-        </button>
+          class="btn-icon btn-settings"
+          :class="{ active: showSceneManager }"
+          @click="showSceneManager = !showSceneManager"
+          title="场景管理 & 设置"
+        >⚙</button>
       </div>
     </div>
+
+    <!-- 场景选择器 -->
+    <div class="scene-bar" v-if="scenes.length > 0">
+      <label class="scene-label">场景</label>
+      <select class="scene-select" :value="activeSceneId" @change="onSceneChange">
+        <option v-for="s in scenes" :key="s.id" :value="s.id">{{ s.name }}</option>
+      </select>
+    </div>
+
+    <!-- 场景管理弹窗 -->
+    <SceneManager v-if="showSceneManager" @close="showSceneManager = false" />
 
     <!-- 输入区 -->
     <div class="input-section">
@@ -221,6 +260,23 @@ const showHistory = computed(() => store.state.history.length > 0);
         <template v-else-if="store.state.outputStatus === 'error'">
           <span class="output-error">请求失败，请检查 LLM 配置后重试</span>
         </template>
+        <!-- 多候选展示 -->
+        <template v-else-if="hasCandidates && store.state.outputStatus === 'done'">
+          <div
+            v-for="(text, idx) in store.state.candidates"
+            :key="idx"
+            class="candidate-item"
+          >
+            <span class="candidate-number">{{ idx + 1 }}.</span>
+            <span class="candidate-text">{{ text }}</span>
+            <button
+              class="btn-copy-candidate"
+              @click="handleCopyCandidate(text)"
+              title="复制此条"
+            >📋</button>
+          </div>
+        </template>
+        <!-- 单条展示 / streaming -->
         <template v-else>
           <span class="output-text">{{ store.state.outputText }}</span>
           <span

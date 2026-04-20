@@ -1,0 +1,247 @@
+.scene-manager {
+  padding: 8px 12px;
+  border-top: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+
+.sm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sm-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+}
+
+.sm-close {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  font-size: 14px;
+  color: #999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+}
+
+.sm-close:hover {
+  background: #e0e0e0;
+  color: #333;
+}
+
+/* 设置行 */
+.sm-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.sm-setting-label {
+  font-size: 12px;
+  color: #666;
+}
+
+.sm-select {
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.sm-divider {
+  height: 1px;
+  background: #e0e0e0;
+  margin: 8px 0;
+}
+
+/* 场景列表 */
+.sm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
+.sm-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.sm-item.editing {
+  flex-direction: column;
+}
+
+.sm-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.sm-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sm-default-badge {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.sm-item-desc {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sm-item-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+/* 按钮 */
+.sm-btn {
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sm-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+}
+
+.sm-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sm-btn-edit,
+.sm-btn-delete {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.sm-btn-delete:hover:not(:disabled) {
+  background: #ffebee;
+  border-color: #ffcdd2;
+}
+
+.sm-btn-confirm {
+  background: #1976d2;
+  color: #fff;
+  border-color: #1976d2;
+}
+
+.sm-btn-confirm:hover:not(:disabled) {
+  background: #1565c0;
+}
+
+.sm-btn-cancel {
+  color: #666;
+}
+
+.sm-btn-add {
+  width: 100%;
+  padding: 6px;
+  border-style: dashed;
+  border-color: #ccc;
+  color: #888;
+  text-align: center;
+}
+
+.sm-btn-add:hover {
+  border-color: #90caf9;
+  color: #1976d2;
+  background: #e3f2fd;
+}
+
+/* 编辑/新增表单 */
+.sm-edit-form,
+.sm-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.sm-add-form {
+  margin-bottom: 8px;
+  padding: 8px;
+  border: 1px dashed #ccc;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.sm-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.sm-input:focus {
+  border-color: #90caf9;
+}
+
+.sm-textarea {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+}
+
+.sm-textarea:focus {
+  border-color: #90caf9;
+}
+
+.sm-edit-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
