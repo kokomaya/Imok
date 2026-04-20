@@ -42,10 +42,6 @@ const DEFAULT_SETTINGS = {
   fontWeight: 'normal',
   /** 字体 */
   fontFamily: 'default',
-  /** 流式字幕：首次 partial 最小语音时长（秒） */
-  partialMinSeconds: 0.3,
-  /** 流式字幕：partial 更新间隔（秒） */
-  partialIntervalSeconds: 0.3,
 };
 
 // ---------------------------------------------------------------

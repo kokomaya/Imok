@@ -74,15 +74,6 @@ export function useIPCListeners({ status, meetingActive, meetingStopping, lastMe
 
     cleanupFns.push(
       window.electronAPI.on('python:transcription', (data) => {
-        // 最终结果到达时，移除该音频源的 partial 条目
-        const source = data.source || '';
-        const partialIdx = transcriptions.value.findIndex(
-          (t) => t._isPartial && t._partialSource === source
-        );
-        if (partialIdx !== -1) {
-          transcriptions.value.splice(partialIdx, 1);
-        }
-
         transcriptions.value.push({
           id: Date.now(),
           text: data.text,
@@ -95,32 +86,6 @@ export function useIPCListeners({ status, meetingActive, meetingStopping, lastMe
           text: data.text,
           timestamp: Date.now() / 1000,
         });
-      }),
-    );
-
-    // 流式中间转写 — 实时更新，最终结果到达后自动替换
-    cleanupFns.push(
-      window.electronAPI.on('python:transcription-partial', (data) => {
-        const source = data.source || '';
-        const existing = transcriptions.value.find(
-          (t) => t._isPartial && t._partialSource === source
-        );
-        if (existing) {
-          existing.text = data.text;
-          existing.language = data.language || existing.language;
-          existing.timestamp = new Date().toLocaleTimeString();
-        } else {
-          transcriptions.value.push({
-            id: Date.now() + Math.random(),
-            text: data.text,
-            language: data.language || '',
-            speaker: '',
-            source: source,
-            timestamp: new Date().toLocaleTimeString(),
-            _isPartial: true,
-            _partialSource: source,
-          });
-        }
       }),
     );
 

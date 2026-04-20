@@ -251,19 +251,6 @@ async def _run_subprocess(source_type: str) -> None:
         )
         writer.write(msg)
 
-    def _on_partial_transcription(event: TranscriptionEvent) -> None:
-        """Pipeline 流式中间转写回调 → 写 JSON Lines 到 stdout。"""
-        r = event.result
-        msg = IPCMessage.transcription_partial(
-            r.text,
-            language=r.language,
-            confidence=r.language_probability,
-            segment_start=event.segment_start_time,
-            segment_end=event.segment_end_time,
-            source=event.source_name,
-        )
-        writer.write(msg)
-
     def _on_segment_summary(segment) -> None:
         """段落摘要回调 → 写 JSON Lines 到 stdout。"""
         msg = IPCMessage.segment_summary(
@@ -436,7 +423,6 @@ async def _run_subprocess(source_type: str) -> None:
                 extra_sources=extra_sources,
             )
             pl.on_transcription(_on_transcription)
-            pl.on_partial_transcription(_on_partial_transcription)
 
             # 注册音频电平回调 → IPC 实时推送
             def _on_audio_level(levels):
@@ -600,20 +586,6 @@ async def _run_subprocess(source_type: str) -> None:
             selected_mic_device = int(mic) if mic is not None else None
             logger.info("Device selection updated: loopback=%s, mic=%s",
                         selected_loopback_device, selected_mic_device)
-        elif action == ControlAction.SET_PARTIAL_SETTINGS:
-            p_min = message.data.get("partial_min_s")
-            p_int = message.data.get("partial_interval_s")
-            if isinstance(p_min, (int, float)) and isinstance(p_int, (int, float)):
-                p_min = max(0.3, float(p_min))
-                p_int = max(0.2, float(p_int))
-                if pipeline is not None:
-                    pipeline.set_partial_timing(p_min, p_int)
-                logger.info("Partial settings updated: min=%.1fs, interval=%.1fs", p_min, p_int)
-            else:
-                writer.write(IPCMessage.error(
-                    "invalid_partial_settings",
-                    f"Need partial_min_s and partial_interval_s as numbers",
-                ))
         else:
             logger.warning("Unknown control action: %s", action)
 

@@ -54,7 +54,6 @@ class TranscriptionEvent:
     speaker: str = ""  # 说话人 ID（如 "Speaker_1"），空字符串表示未识别
     source_name: str = ""  # 音频源名称（如 "wasapi"、"mic"）
     timestamp: float = field(default_factory=time.time)  # 事件产生的墙钟时间
-    is_partial: bool = False  # 是否为流式中间结果
 
 
 # 回调类型
@@ -121,7 +120,6 @@ class MeetingPipeline:
                 self._sources.append((name, src, src_vad))
 
         self._callbacks: List[TranscriptionCallback] = []
-        self._partial_callbacks: List[TranscriptionCallback] = []
         self._level_callbacks: List[Callable] = []
         self._state = PipelineState.IDLE
         self._stop_event = asyncio.Event()
@@ -134,12 +132,6 @@ class MeetingPipeline:
             max_workers=max_asr_workers,
             thread_name_prefix="asr-worker",
         )
-
-        # 标记主 ASR 是否正在处理
-        self._asr_busy = False
-        # 最新待处理的 partial 段（latest-only：新的覆盖旧的）
-        self._pending_partial: Optional[AudioSegment] = None
-        self._partial_processing = False
 
         # 统计信息
         self._segments_processed = 0
@@ -164,19 +156,9 @@ class MeetingPipeline:
         """注册转写结果回调。可注册多个，按添加顺序调用。"""
         self._callbacks.append(callback)
 
-    def on_partial_transcription(self, callback: TranscriptionCallback) -> None:
-        """注册流式中间转写结果回调。语音进行中会周期性触发。"""
-        self._partial_callbacks.append(callback)
-
     def on_audio_level(self, callback: Callable) -> None:
         """注册音频电平回调。callback(levels: dict[str, float])"""
         self._level_callbacks.append(callback)
-
-    def set_partial_timing(self, partial_min_s: float, partial_interval_s: float) -> None:
-        """运行时更新所有 VAD 实例的 partial 参数。"""
-        for _name, _source, vad in self._sources:
-            if hasattr(vad, 'set_partial_timing'):
-                vad.set_partial_timing(partial_min_s, partial_interval_s)
 
     async def start(self) -> None:
         """启动流水线 — 开始音频采集和识别循环。
@@ -339,12 +321,6 @@ class MeetingPipeline:
                 # 将语音段送入队列（标记 source_name），队列满则丢弃最旧段
                 for segment in segments:
                     segment.source_name = source_name
-                    if segment.is_partial:
-                        # 中间结果用 latest-only 模式：只保留最新的
-                        self._pending_partial = segment
-                        if not self._partial_processing:
-                            asyncio.create_task(self._partial_loop())
-                        continue
                     if self._segment_queue.full():
                         try:
                             self._segment_queue.get_nowait()
@@ -403,7 +379,6 @@ class MeetingPipeline:
         queue_depth = self._segment_queue.qsize()
         source_name = getattr(segment, 'source_name', '') or ''
 
-        self._asr_busy = True
         try:
             # ASR 在线程池中执行（CPU 密集型）
             result = await loop.run_in_executor(
@@ -483,62 +458,3 @@ class MeetingPipeline:
                 segment.start_time,
                 segment.end_time,
             )
-        finally:
-            self._asr_busy = False
-
-    async def _partial_loop(self) -> None:
-        """处理 partial 段的循环 — latest-only 模式。
-
-        每次取出最新的 pending partial 进行 ASR，处理期间如果有更新的
-        partial 到达，处理完当前的后继续处理最新的（跳过中间的过时段）。
-        """
-        if self._partial_processing:
-            return
-        self._partial_processing = True
-
-        try:
-            while self._pending_partial is not None:
-                segment = self._pending_partial
-                self._pending_partial = None
-
-                if not self._partial_callbacks:
-                    break
-
-                # 主 ASR 忙时等待（不跳过，保证即时性）
-                loop = asyncio.get_running_loop()
-                source_name = getattr(segment, 'source_name', '') or ''
-
-                try:
-                    # 用快速推理（beam=1, 无 word_timestamps）降低延迟
-                    transcribe_fn = getattr(self._asr, 'transcribe_fast', self._asr.transcribe)
-                    result = await loop.run_in_executor(
-                        self._asr_executor,
-                        transcribe_fn,
-                        segment.audio_data,
-                    )
-
-                    if result.is_empty:
-                        continue
-
-                    event = TranscriptionEvent(
-                        result=result,
-                        segment_start_time=segment.start_time,
-                        segment_end_time=segment.end_time,
-                        source_name=source_name,
-                        is_partial=True,
-                    )
-
-                    for callback in self._partial_callbacks:
-                        try:
-                            callback(event)
-                        except Exception:
-                            logger.debug("Error in partial transcription callback", exc_info=True)
-
-                except Exception:
-                    logger.debug(
-                        "Partial ASR failed for segment %.2f-%.2f s",
-                        segment.start_time, segment.end_time,
-                        exc_info=True,
-                    )
-        finally:
-            self._partial_processing = False

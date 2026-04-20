@@ -436,7 +436,6 @@ function onEditTranscription(item, event) {
             v-for="item in transcriptions"
             :key="item.id"
             class="transcription-item"
-            :class="{ partial: item._isPartial }"
           >
             <span class="time">{{ item.timestamp }}</span>
             <span class="source-icon" v-if="item.source" :title="item.source === 'mic' ? '麦克风' : '系统音频'">{{ item.source === 'mic' ? '🎤' : '🔊' }}</span>
@@ -444,10 +443,10 @@ function onEditTranscription(item, event) {
             <span class="lang" v-if="item.language">[{{ item.language }}]</span>
             <span
               class="text"
-              :contenteditable="!item._isPartial"
+              contenteditable="true"
               @blur="onEditTranscription(item, $event)"
               @keydown.enter.prevent="$event.target.blur()"
-            >{{ item.text }}<span v-if="item._isPartial" class="typing-cursor">▍</span></span>
+            >{{ item.text }}</span>
           </div>
         </div>
       </section>

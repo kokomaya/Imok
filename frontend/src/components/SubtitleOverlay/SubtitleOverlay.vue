@@ -83,16 +83,6 @@ function onSettingsSave() {
   scheduleSave();
 }
 
-function onPartialSettingsChange({ partialMinSeconds, partialIntervalSeconds }) {
-  // 发送到 Python 后端实时更新 VAD 参数
-  if (window.electronAPI?.sendControl) {
-    window.electronAPI.sendControl('set_partial_settings', {
-      partial_min_s: partialMinSeconds,
-      partial_interval_s: partialIntervalSeconds,
-    });
-  }
-}
-
 // ---------------------------------------------------------------
 // 生命周期
 // ---------------------------------------------------------------
@@ -126,14 +116,6 @@ onMounted(async () => {
       }
     },
   });
-
-  // 将持久化的 partial 设置同步到后端
-  if (window.electronAPI?.sendControl) {
-    window.electronAPI.sendControl('set_partial_settings', {
-      partial_min_s: settings.partialMinSeconds,
-      partial_interval_s: settings.partialIntervalSeconds,
-    });
-  }
 
   // 监听全局快捷键切换锁定状态（解决锁定后无法点击解锁的问题）
   if (window.electronAPI?.on) {
@@ -174,7 +156,6 @@ onUnmounted(() => {
       <SubtitleSettings
         @save="onSettingsSave"
         @lock-toggle="onLockToggle"
-        @partial-change="onPartialSettingsChange"
         @close="showSettings = false"
       />
     </div>
@@ -186,7 +167,6 @@ onUnmounted(() => {
           v-for="entry in displayEntries"
           :key="entry.id"
           class="subtitle-entry"
-          :class="{ partial: entry.isPartial }"
         >
           <div class="entry-header" v-if="settings.showTimestamp">
             <span class="time">{{ formatTime(entry.timestamp) }}</span>
@@ -194,10 +174,7 @@ onUnmounted(() => {
               {{ entry.language }}
             </span>
           </div>
-          <div class="entry-original">
-            {{ entry.original }}
-            <span v-if="entry.isPartial" class="typing-indicator">▍</span>
-          </div>
+          <div class="entry-original">{{ entry.original }}</div>
           <div
             class="entry-translation"
             :class="getStatusClass(entry.translationStatus)"

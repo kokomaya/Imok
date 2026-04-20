@@ -128,13 +128,11 @@
 /* 字幕条目 */
 .subtitle-entry {
   padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .subtitle-entry:last-child {
-}
-
-.subtitle-entry.partial {
-  opacity: 0.7;
+  border-bottom: none;
 }
 
 .entry-header {

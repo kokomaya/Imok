@@ -39,7 +39,6 @@ class AudioSegment:
         end_time: 相对于 VAD 启动的结束时间 (秒)。
         duration_s: 时长 (秒)，自动计算。
         source_name: 产生此段落的音频源名称（如 "wasapi"、"mic"）。
-        is_partial: 是否为中间结果（语音仍在进行中，尚未结束）。
     """
 
     audio_data: np.ndarray
@@ -47,7 +46,6 @@ class AudioSegment:
     start_time: float
     end_time: float
     source_name: str = ""
-    is_partial: bool = False
     duration_s: float = field(init=False)
 
     def __post_init__(self) -> None:
@@ -74,8 +72,6 @@ class VoiceActivityDetector:
         threshold: float = 0.5,
         min_silence_ms: int = 300,
         max_segment_s: float = 15.0,
-        partial_min_s: float = 0.3,
-        partial_interval_s: float = 0.3,
     ) -> None:
         if sample_rate not in _SILERO_WINDOW_SIZES:
             raise ValueError(
@@ -88,8 +84,6 @@ class VoiceActivityDetector:
         self._min_silence_samples = int(min_silence_ms * sample_rate / 1000)
         self._max_segment_samples = int(max_segment_s * sample_rate)
         self._window_size = _SILERO_WINDOW_SIZES[sample_rate]
-        self._partial_min_samples = int(partial_min_s * sample_rate)
-        self._partial_interval_samples = int(partial_interval_s * sample_rate)
 
         # 加载 Silero-VAD 模型
         self._model, _utils = torch.hub.load(
@@ -103,14 +97,11 @@ class VoiceActivityDetector:
         self._reset_state()
 
         logger.info(
-            "VAD initialized: sr=%d, threshold=%.2f, min_silence=%dms, max_segment=%.1fs, "
-            "partial_min=%.1fs, partial_interval=%.1fs",
+            "VAD initialized: sr=%d, threshold=%.2f, min_silence=%dms, max_segment=%.1fs",
             sample_rate,
             threshold,
             min_silence_ms,
             max_segment_s,
-            partial_min_s,
-            partial_interval_s,
         )
 
     def feed(self, audio_chunk: np.ndarray) -> List[AudioSegment]:
@@ -120,9 +111,8 @@ class VoiceActivityDetector:
             audio_chunk: mono float32 音频数据，采样率必须匹配构造时的 sample_rate。
 
         Returns:
-            0 或多个 AudioSegment。包含：
-            - 完整段（is_partial=False）：语音段结束（静音或超长截断）
-            - 中间段（is_partial=True）：语音进行中但已积累足够长度，用于流式展示
+            0 或多个 AudioSegment。大多数调用返回空列表，
+            只有在检测到语音段结束（静音或超长截断）时才会返回。
         """
         self._buffer = np.concatenate([self._buffer, audio_chunk])
         completed_segments: List[AudioSegment] = []
@@ -145,7 +135,6 @@ class VoiceActivityDetector:
                     self._speech_start_sample = self._total_samples_fed - self._window_size
                     self._speech_buffer = []
                     self._silence_counter = 0
-                    self._last_partial_samples = 0
 
                 self._speech_buffer.append(window)
                 self._silence_counter = 0
@@ -155,15 +144,6 @@ class VoiceActivityDetector:
                 if total_speech_samples >= self._max_segment_samples:
                     segment = self._finalize_segment()
                     completed_segments.append(segment)
-                elif total_speech_samples >= self._partial_min_samples:
-                    # 检查是否该发送中间结果
-                    samples_since_last = total_speech_samples - self._last_partial_samples
-                    if (self._last_partial_samples == 0 or
-                            samples_since_last >= self._partial_interval_samples):
-                        partial = self._make_partial_segment()
-                        if partial is not None:
-                            completed_segments.append(partial)
-                            self._last_partial_samples = total_speech_samples
 
             else:
                 if self._in_speech:
@@ -197,15 +177,6 @@ class VoiceActivityDetector:
     def sample_rate(self) -> int:
         return self._sample_rate
 
-    def set_partial_timing(self, partial_min_s: float, partial_interval_s: float) -> None:
-        """运行时更新 partial 参数（不重置状态）。"""
-        self._partial_min_samples = int(partial_min_s * self._sample_rate)
-        self._partial_interval_samples = int(partial_interval_s * self._sample_rate)
-        logger.info(
-            "VAD partial timing updated: min=%.1fs, interval=%.1fs",
-            partial_min_s, partial_interval_s,
-        )
-
     def _reset_state(self) -> None:
         """重置内部跟踪变量。"""
         self._buffer = np.array([], dtype=np.float32)
@@ -214,7 +185,6 @@ class VoiceActivityDetector:
         self._speech_start_sample = 0
         self._silence_counter = 0
         self._total_samples_fed = 0
-        self._last_partial_samples = 0
 
     def _get_speech_prob(self, window: np.ndarray) -> float:
         """对单个窗口执行 VAD 推理，返回语音概率。"""
@@ -222,28 +192,6 @@ class VoiceActivityDetector:
         with torch.no_grad():
             prob = self._model(tensor, self._sample_rate).item()
         return prob
-
-    def _make_partial_segment(self) -> Optional[AudioSegment]:
-        """创建当前累积语音的中间快照（不重置状态）。"""
-        if not self._speech_buffer:
-            return None
-
-        audio_data = np.concatenate(self._speech_buffer)
-        start_time = self._speech_start_sample / self._sample_rate
-        end_time = start_time + len(audio_data) / self._sample_rate
-
-        logger.debug(
-            "VAD partial: %.2f-%.2f s (%.2f s, %d samples)",
-            start_time, end_time, end_time - start_time, len(audio_data),
-        )
-
-        return AudioSegment(
-            audio_data=audio_data,
-            sample_rate=self._sample_rate,
-            start_time=start_time,
-            end_time=end_time,
-            is_partial=True,
-        )
 
     def _finalize_segment(self) -> AudioSegment:
         """将当前累积的语音数据打包为 AudioSegment 并重置状态。"""

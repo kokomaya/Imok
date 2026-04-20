@@ -263,9 +263,6 @@ class PythonBridge extends EventEmitter {
       case 'transcription':
         this.emit('transcription', data);
         break;
-      case 'transcription_partial':
-        this.emit('transcription-partial', data);
-        break;
       case 'status':
         this.emit('status', data);
         break;

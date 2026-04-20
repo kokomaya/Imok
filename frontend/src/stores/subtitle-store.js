@@ -15,16 +15,12 @@ import { reactive, computed } from 'vue';
  * @property {string} language - 原文语言 (zh / en / ...)
  * @property {number} timestamp - 时间戳 (epoch ms)
  * @property {'pending' | 'translating' | 'done' | 'error'} translationStatus
- * @property {boolean} [isPartial] - 是否为流式中间结果
  */
 
 const MAX_ENTRIES = 50;
 const VISIBLE_COUNT = 5;
 
 let nextId = 1;
-
-/** @type {Map<string, number>} 每个音频源的当前 partial entry id */
-const partialEntryIds = new Map();
 
 const state = reactive({
   /** @type {SubtitleEntry[]} */
@@ -38,22 +34,11 @@ const state = reactive({
 });
 
 /**
- * 添加一条原始转写字幕（最终结果），同时移除该源的中间结果条目。
- * @param {{ text: string, language?: string, confidence?: number, segment_start?: number, segment_end?: number, source?: string }} data
+ * 添加一条原始转写字幕。
+ * @param {{ text: string, language?: string, confidence?: number, segment_start?: number, segment_end?: number }} data
  * @returns {SubtitleEntry}
  */
 function addTranscription(data) {
-  // 移除该音频源的 partial 条目（被最终结果替换）
-  const source = data.source || '';
-  const partialId = partialEntryIds.get(source);
-  if (partialId != null) {
-    const idx = state.entries.findIndex((e) => e.id === partialId);
-    if (idx !== -1) {
-      state.entries.splice(idx, 1);
-    }
-    partialEntryIds.delete(source);
-  }
-
   const entry = {
     id: nextId++,
     original: data.text,
@@ -61,7 +46,6 @@ function addTranscription(data) {
     language: data.language || '',
     timestamp: Date.now(),
     translationStatus: 'pending',
-    isPartial: false,
   };
 
   state.entries.push(entry);
@@ -72,46 +56,6 @@ function addTranscription(data) {
   }
 
   return entry;
-}
-
-/**
- * 更新流式中间转写结果。每个音频源只保留一条 partial 条目，
- * 新的 partial 会替换旧的文本。
- * @param {{ text: string, language?: string, source?: string, segment_start?: number, segment_end?: number }} data
- */
-function updatePartial(data) {
-  const source = data.source || '';
-  const existingId = partialEntryIds.get(source);
-
-  if (existingId != null) {
-    // 更新已有的 partial 条目
-    const entry = state.entries.find((e) => e.id === existingId);
-    if (entry) {
-      entry.original = data.text;
-      entry.language = data.language || entry.language;
-      entry.timestamp = Date.now();
-      return;
-    }
-  }
-
-  // 创建新的 partial 条目
-  const entry = {
-    id: nextId++,
-    original: data.text,
-    translation: '',
-    language: data.language || '',
-    timestamp: Date.now(),
-    translationStatus: 'pending',
-    isPartial: true,
-  };
-
-  state.entries.push(entry);
-  partialEntryIds.set(source, entry.id);
-
-  // 限制最大条目数
-  if (state.entries.length > MAX_ENTRIES) {
-    state.entries.splice(0, state.entries.length - MAX_ENTRIES);
-  }
 }
 
 /**
@@ -171,7 +115,6 @@ export const subtitleStore = {
   state,
   visibleEntries,
   addTranscription,
-  updatePartial,
   updateTranslation,
   markTranslationError,
   setPythonStatus,
