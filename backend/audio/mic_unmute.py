@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 _PYCAW_AVAILABLE = False
 try:
+    import comtypes
     from comtypes import CLSCTX_ALL
-    from ctypes import POINTER, cast
     from pycaw.pycaw import (
         AudioUtilities,
         IAudioEndpointVolume,
@@ -43,6 +43,16 @@ def ensure_mic_unmuted(device_name: Optional[str] = None) -> bool:
         logger.debug("pycaw not available, skipping mic mute check")
         return False
 
+    # 显式初始化 COM（MTA 模式），确保当前线程 COM 就绪，
+    # 并在 finally 中配对 CoUninitialize 释放。
+    comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
+    try:
+        return _do_unmute(device_name)
+    finally:
+        comtypes.CoUninitialize()
+
+
+def _do_unmute(device_name: Optional[str]) -> bool:
     unmuted_any = False
     try:
         enumerator = AudioUtilities.GetDeviceEnumerator()
@@ -51,17 +61,27 @@ def ensure_mic_unmuted(device_name: Optional[str] = None) -> bool:
         )
         for i in range(collection.GetCount()):
             dev = collection.Item(i)
+            vol = None
             try:
+                # 用 QueryInterface 代替 ctypes.cast，
+                # 确保 AddRef 正确计数，避免 double-free
                 iface = dev.Activate(
                     IAudioEndpointVolume._iid_, CLSCTX_ALL, None
                 )
-                vol = cast(iface, POINTER(IAudioEndpointVolume))
+                vol = iface.QueryInterface(IAudioEndpointVolume)
                 if vol.GetMute():
                     vol.SetMute(0, None)
                     logger.info("Unmuted capture endpoint %d", i)
                     unmuted_any = True
             except Exception:
                 logger.debug("Could not check/unmute endpoint %d", i, exc_info=True)
+            finally:
+                # 在同一线程上显式按序释放，避免 GC 跨线程释放
+                del vol
+                del iface
+                del dev
+        del collection
+        del enumerator
     except Exception:
         logger.debug("Failed to enumerate capture endpoints", exc_info=True)
 
