@@ -27,6 +27,8 @@ PROJECT_ROOT = Path(SPECPATH)
 hidden_imports = [
     # backend 子模块
     *collect_submodules('backend'),
+    # numpy 2.x: _core 是核心模块，PyInstaller hook 可能漏收
+    *collect_submodules('numpy._core'),
     # faster-whisper / ctranslate2
     'faster_whisper',
     'ctranslate2',
@@ -67,6 +69,13 @@ datas = [
 # ── 二进制文件 ────────────────────────────────────────────────
 binaries = []
 
+# PyInstaller 有时漏收 torch/lib 下的关键 DLL（c10、cublas 等）
+_torch_lib = PROJECT_ROOT / '.venv' / 'Lib' / 'site-packages' / 'torch' / 'lib'
+for _dll_name in ('c10.dll', 'cublas64_12.dll', 'caffe2_nvrtc.dll'):
+    _dll_path = _torch_lib / _dll_name
+    if _dll_path.exists():
+        binaries.append((str(_dll_path), 'torch/lib'))
+
 # 尝试收集 ctranslate2 的 DLL
 try:
     ct2_datas = collect_data_files('ctranslate2')
@@ -85,6 +94,13 @@ except Exception:
 try:
     fw_datas = collect_data_files('faster_whisper')
     datas.extend(fw_datas)
+except Exception:
+    pass
+
+# 收集 numpy 数据（numpy 2.x 的 _core 二进制文件）
+try:
+    np_datas = collect_data_files('numpy._core')
+    datas.extend(np_datas)
 except Exception:
     pass
 
@@ -132,3 +148,20 @@ coll = COLLECT(
     upx=False,
     name='imok-backend',
 )
+
+# ── 修复 vcruntime 版本冲突 ──────────────────────────────────
+# PyInstaller 打包的 vcruntime 来自 Python 安装（14.36），但 torch CUDA 12.8
+# 编译所用 MSVC 版本更新（14.44）。c10.dll 的 DllMain 在加载旧版 vcruntime 时
+# 返回 FALSE（WinError 1114）。用系统最新版覆盖即可解决。
+import shutil as _shutil
+
+_dist_internal = Path(SPECPATH) / 'dist' / 'imok-backend' / '_internal'
+_vcr_names = ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll']
+_sys32 = Path(r'C:\Windows\System32')
+
+for _vcr in _vcr_names:
+    _src = _sys32 / _vcr
+    _dst = _dist_internal / _vcr
+    if _src.exists() and _dst.exists():
+        _shutil.copy2(str(_src), str(_dst))
+        print(f'  [post-build] Replaced {_vcr} with system version')

@@ -17,6 +17,40 @@ const { loadLLMConfig } = require('./llm-config');
 const appMenu = require('./app-menu');
 
 // ---------------------------------------------------------------
+// 文件日志（生产模式下 console.log 看不到，写文件方便调试）
+// ---------------------------------------------------------------
+
+let LOG_FILE = null;
+const _origLog = console.log;
+const _origWarn = console.warn;
+const _origError = console.error;
+
+function _ensureLogFile() {
+  if (!LOG_FILE) {
+    try {
+      LOG_FILE = path.join(app.getPath('userData'), 'main-debug.log');
+      fs.writeFileSync(LOG_FILE, `=== Imok main process started ${new Date().toISOString()} ===\n`);
+    } catch (_) {
+      LOG_FILE = false; // 标记为不可用，不再重试
+    }
+  }
+}
+
+function _writeLog(level, args) {
+  _ensureLogFile();
+  if (!LOG_FILE) return;
+  const ts = new Date().toISOString();
+  const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+  try {
+    fs.appendFileSync(LOG_FILE, `[${ts}] [${level}] ${msg}\n`);
+  } catch (_) { /* ignore */ }
+}
+
+console.log = (...args) => { _origLog(...args); _writeLog('LOG', args); };
+console.warn = (...args) => { _origWarn(...args); _writeLog('WARN', args); };
+console.error = (...args) => { _origError(...args); _writeLog('ERROR', args); };
+
+// ---------------------------------------------------------------
 // 常量
 // ---------------------------------------------------------------
 
@@ -134,24 +168,29 @@ function createMainWindow() {
 function setupIPC() {
   // 控制命令：renderer → PythonBridge → Python 子进程
   ipcMain.handle('python:control', (_event, action, extra) => {
+    console.log(`[IPC] python:control action=${action} extra=${JSON.stringify(extra)} bridge=${!!pythonBridge} running=${pythonBridge?.isRunning} pid=${pythonBridge?.pid}`);
     if (pythonBridge && pythonBridge.isRunning) {
       pythonBridge.sendControl(action, extra);
       return { ok: true };
     }
+    console.warn(`[IPC] python:control REJECTED — bridge not running`);
     return { ok: false, error: 'Python bridge not running' };
   });
 
   // 启动 Python 子进程
   ipcMain.handle('python:start', () => {
+    console.log(`[IPC] python:start bridge=${!!pythonBridge}`);
     if (pythonBridge) {
       pythonBridge.start();
       return { ok: true };
     }
+    console.warn('[IPC] python:start REJECTED — bridge not initialized');
     return { ok: false, error: 'Python bridge not initialized' };
   });
 
   // 停止 Python 子进程
   ipcMain.handle('python:stop', () => {
+    console.log(`[IPC] python:stop bridge=${!!pythonBridge}`);
     if (pythonBridge) {
       pythonBridge.destroy();
       pythonBridge = null;
@@ -162,10 +201,12 @@ function setupIPC() {
 
   // 获取 Python 子进程状态
   ipcMain.handle('python:status', () => {
-    return {
+    const s = {
       running: pythonBridge ? pythonBridge.isRunning : false,
       pid: pythonBridge ? pythonBridge.pid : -1,
     };
+    console.log(`[IPC] python:status → running=${s.running} pid=${s.pid}`);
+    return s;
   });
 
   // 打开/关闭字幕悬浮窗
@@ -553,10 +594,12 @@ function initPythonBridge() {
   });
 
   pythonBridge.on('status', (data) => {
+    console.log(`[Main] python:status → state=${data.state} meeting_id=${data.meeting_id || 'N/A'}`);
     broadcast('python:status', data);
   });
 
   pythonBridge.on('python-error', (data) => {
+    console.error('[Main] python:error →', JSON.stringify(data));
     broadcast('python:error', data);
   });
 
@@ -573,9 +616,7 @@ function initPythonBridge() {
   });
 
   pythonBridge.on('log', (text) => {
-    if (IS_DEV) {
-      console.log('[Python]', text);
-    }
+    console.log('[Python]', text);
   });
 
   pythonBridge.on('exit', ({ code, signal }) => {

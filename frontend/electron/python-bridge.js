@@ -121,6 +121,7 @@ class PythonBridge extends EventEmitter {
    */
   sendControl(action, extra = {}) {
     if (!this._process || !this._process.stdin || this._process.stdin.destroyed) {
+      console.warn(`[PythonBridge] sendControl(${action}) FAILED — stdin unavailable, process=${!!this._process}`);
       this.emit('error', { code: 'stdin_unavailable', message: 'Python process stdin not available' });
       return;
     }
@@ -132,8 +133,11 @@ class PythonBridge extends EventEmitter {
     };
 
     try {
-      this._process.stdin.write(JSON.stringify(message) + '\n');
+      const json = JSON.stringify(message);
+      console.log(`[PythonBridge] sendControl → stdin: ${json}`);
+      this._process.stdin.write(json + '\n');
     } catch (err) {
+      console.error(`[PythonBridge] sendControl(${action}) write error:`, err.message);
       this.emit('error', { code: 'stdin_write_error', message: err.message });
     }
   }
@@ -171,6 +175,8 @@ class PythonBridge extends EventEmitter {
           `--log-level=${this._logLevel}`,
         ];
 
+    console.log(`[PythonBridge] _spawn() pythonPath=${this._pythonPath} args=${JSON.stringify(args)} cwd=${this._backendDir} bundled=${this._bundled}`);
+
     this._process = spawn(this._pythonPath, args, {
       cwd: this._backendDir,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -182,6 +188,8 @@ class PythonBridge extends EventEmitter {
         IMOK_PROJECT_ROOT: this._projectRoot,
       },
     });
+
+    console.log(`[PythonBridge] spawned pid=${this._process.pid}`);
 
     this._lineBuffer = '';
 
@@ -197,6 +205,7 @@ class PythonBridge extends EventEmitter {
 
     // 进程退出
     this._process.on('close', (code, signal) => {
+      console.log(`[PythonBridge] process exited code=${code} signal=${signal}`);
       this._process = null;
       this.emit('exit', { code, signal });
 
@@ -207,6 +216,7 @@ class PythonBridge extends EventEmitter {
 
     // 进程错误（如 Python 不存在）
     this._process.on('error', (err) => {
+      console.error(`[PythonBridge] spawn error:`, err.message);
       this.emit('error', { code: 'spawn_error', message: err.message });
       this._process = null;
     });
@@ -246,6 +256,8 @@ class PythonBridge extends EventEmitter {
    */
   _dispatchMessage(message) {
     const { type, data } = message;
+
+    console.log(`[PythonBridge] ← msg type=${type} data=${JSON.stringify(data).substring(0, 200)}`);
 
     switch (type) {
       case 'transcription':
