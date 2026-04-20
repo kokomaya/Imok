@@ -8,6 +8,7 @@ import { AudioDevicePanel } from '@/components/AudioDevicePanel';
 import { HistoryPanel } from '@/components/HistoryPanel';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
 import { summaryStore } from '@/stores/summary-store.js';
+import { workspaceStore } from '@/stores/workspace-store.js';
 import { useMeetingHistory } from '@/composables/useMeetingHistory.js';
 import { useIPCListeners } from '@/composables/useIPCListeners.js';
 
@@ -137,6 +138,7 @@ async function doStartNewMeeting() {
   lastMeetingInfo.value = null;
   transcriptions.value = [];
   summaryStore.clearAll();
+  workspaceStore.reset();
   loadedMeetingId.value = null;
 
   const source = getSourceType();
@@ -255,6 +257,9 @@ function handleMenuAction(action, data) {
     case 'toggle-device-panel':
       devicePanelVisible.value = !devicePanelVisible.value;
       break;
+    case 'save-workspace':
+      saveWorkspace();
+      break;
   }
 }
 
@@ -276,9 +281,34 @@ onUnmounted(() => {
 });
 
 function onBeforeUnload(e) {
-  if (summaryStore.isDirty.value && summaryStore.activeMeetingId.value) {
+  if (workspaceStore.isDirty.value && summaryStore.activeMeetingId.value) {
     e.preventDefault();
     e.returnValue = '';
+  }
+}
+
+// ── 全局保存 ──
+
+const saving = ref(false);
+
+async function saveWorkspace() {
+  const meetingId = summaryStore.activeMeetingId.value;
+  if (!meetingId || !workspaceStore.isDirty.value) return;
+  saving.value = true;
+  try {
+    if (summaryStore.isDirty.value && summaryStore.hasSummaryContent.value && window.electronAPI?.saveMeetingSummaries) {
+      const data = summaryStore.getSummariesForSave();
+      const result = await window.electronAPI.saveMeetingSummaries(meetingId, data);
+      if (!result.ok) {
+        showError('保存失败：' + (result.error || '未知错误'));
+        return;
+      }
+    }
+    workspaceStore.markAllSaved();
+  } catch (err) {
+    showError('保存失败：' + err.message);
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -296,6 +326,7 @@ function onEditTranscription(item, event) {
   const newText = event.target.textContent.trim();
   if (newText !== item.text) {
     item.text = newText;
+    workspaceStore.markTranscriptionEdited();
   }
 }
 </script>
@@ -365,6 +396,17 @@ function onEditTranscription(item, event) {
         >🎛</button>
 
         <span class="header-sep"></span>
+
+        <!-- 全局保存 -->
+        <button
+          class="btn-save"
+          :class="{ dirty: workspaceStore.isDirty.value }"
+          :disabled="!workspaceStore.canSave.value || saving"
+          @click="saveWorkspace"
+          :title="workspaceStore.isDirty.value ? '保存工作区 (Ctrl+S)' : '无需保存'"
+        >
+          {{ saving ? '⏳' : '💾' }}
+        </button>
 
         <!-- 功能按钮 -->
         <button class="btn-icon" @click="openOverlay" title="打开悬浮字幕">🎯</button>

@@ -18,7 +18,6 @@ import {
 
 const triggeringSegment = ref(false);
 const triggeringGlobal = ref(false);
-const saving = ref(false);
 const summaryInterval = ref(60);
 
 const INTERVAL_OPTIONS = [
@@ -35,26 +34,6 @@ function confirmOverwrite(type) {
   return window.confirm(
     `已存在${type}，重新生成将覆盖当前内容。是否继续？`,
   );
-}
-
-// ── 保存摘要 ──
-
-async function saveSummaries() {
-  const meetingId = summaryStore.activeMeetingId.value;
-  if (!meetingId || !window.electronAPI?.saveMeetingSummaries) return;
-  saving.value = true;
-  try {
-    const data = summaryStore.getSummariesForSave();
-    const result = await window.electronAPI.saveMeetingSummaries(meetingId, data);
-    if (result.ok) {
-      summaryStore.markSaved();
-    } else {
-      console.error('[SummaryPanel] Save failed:', result.error);
-      window.alert('保存失败：' + (result.error || '未知错误'));
-    }
-  } finally {
-    saving.value = false;
-  }
 }
 
 // ── 触发器（自动选择回看/实时模式）──
@@ -208,17 +187,6 @@ function formatUpdatedTime(segment) {
     <div class="panel-header">
       <div class="header-left">
         <span class="panel-title">📋 会议摘要</span>
-        <span v-if="summaryStore.isDirty.value" class="dirty-dot" title="摘要有未保存的修改">●</span>
-        <button
-          v-if="summaryStore.activeMeetingId.value && summaryStore.hasSummaryContent.value"
-          class="save-btn"
-          :class="{ dirty: summaryStore.isDirty.value }"
-          :disabled="saving || !summaryStore.isDirty.value"
-          @click="saveSummaries"
-          :title="summaryStore.isDirty.value ? '保存摘要到会议记录' : '摘要已保存'"
-        >
-          {{ saving ? '⏳' : '💾' }} {{ summaryStore.isDirty.value ? '保存' : '已保存' }}
-        </button>
       </div>
       <div class="header-right">
         <label v-if="!summaryStore.state.reviewMode" class="interval-label" title="自动摘要间隔（60秒 ~ 10分钟）">

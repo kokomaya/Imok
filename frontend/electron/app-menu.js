@@ -74,6 +74,12 @@ function buildAppMenu() {
         },
         { type: 'separator' },
         {
+          label: '保存工作区',
+          accelerator: 'CmdOrCtrl+S',
+          click: () => send('save-workspace'),
+        },
+        { type: 'separator' },
+        {
           label: '历史会议记录',
           accelerator: 'CmdOrCtrl+H',
           click: () => send('toggle-history'),

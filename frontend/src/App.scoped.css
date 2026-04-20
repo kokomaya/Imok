@@ -120,6 +120,45 @@
   border-color: #bbb;
 }
 
+/* ── 全局保存按钮 ── */
+
+.btn-save {
+  width: 32px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  transition: all 0.15s;
+  opacity: 0.5;
+}
+
+.btn-save:hover:not(:disabled) {
+  background: #e8e8e8;
+  border-color: #bbb;
+}
+
+.btn-save.dirty {
+  opacity: 1;
+  border-color: #f9a825;
+  background: #fff8e1;
+}
+
+.btn-save.dirty:hover {
+  background: #fff3c4;
+  border-color: #f57f17;
+}
+
+.btn-save:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
 /* ── 图标按钮 ── */
 
 .btn-icon {

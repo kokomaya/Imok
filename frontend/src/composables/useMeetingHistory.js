@@ -6,6 +6,7 @@
 
 import { nextTick } from 'vue';
 import { summaryStore } from '@/stores/summary-store.js';
+import { workspaceStore } from '@/stores/workspace-store.js';
 
 /**
  * @param {Object} deps
@@ -18,17 +19,17 @@ export function useMeetingHistory({ transcriptions, historyVisible, historyPanel
 
   async function checkUnsavedSummary() {
     const meetingId = summaryStore.activeMeetingId.value;
-    if (!summaryStore.isDirty.value || !meetingId) return true;
+    if (!workspaceStore.isDirty.value || !meetingId) return true;
 
     const action = window.confirm(
-      '当前摘要有未保存的修改，是否保存？\n\n点击"确定"保存后继续，点击"取消"放弃修改。',
+      '当前工作区有未保存的修改，是否保存？\n\n点击"确定"保存后继续，点击"取消"放弃修改。',
     );
     if (action) {
       if (window.electronAPI?.saveMeetingSummaries) {
         const data = summaryStore.getSummariesForSave();
         const result = await window.electronAPI.saveMeetingSummaries(meetingId, data);
         if (result.ok) {
-          summaryStore.markSaved();
+          workspaceStore.markAllSaved();
         } else {
           window.alert('保存失败：' + (result.error || '未知错误'));
           return false;
