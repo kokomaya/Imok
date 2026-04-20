@@ -267,9 +267,9 @@ function getSummariesForSave() {
     summary_type: 'segment',
     raw_text: s.rawText,
     time_range: s.timeRange,
-    topics: s.topics,
-    conclusions: s.conclusions,
-    action_items: s.actionItems,
+    topics: [...s.topics],
+    conclusions: [...s.conclusions],
+    action_items: [...s.actionItems],
     timestamp: s.timestamp / 1000,
   }));
 
@@ -295,7 +295,7 @@ function getSummariesForSave() {
     }
   }
 
-  return { segments, global_summary: globalSummary, action_items: actionItems };
+  return JSON.parse(JSON.stringify({ segments, global_summary: globalSummary, action_items: actionItems }));
 }
 
 export const summaryStore = {
