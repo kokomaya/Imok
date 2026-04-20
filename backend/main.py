@@ -600,6 +600,20 @@ async def _run_subprocess(source_type: str) -> None:
             selected_mic_device = int(mic) if mic is not None else None
             logger.info("Device selection updated: loopback=%s, mic=%s",
                         selected_loopback_device, selected_mic_device)
+        elif action == ControlAction.SET_PARTIAL_SETTINGS:
+            p_min = message.data.get("partial_min_s")
+            p_int = message.data.get("partial_interval_s")
+            if isinstance(p_min, (int, float)) and isinstance(p_int, (int, float)):
+                p_min = max(0.3, float(p_min))
+                p_int = max(0.2, float(p_int))
+                if pipeline is not None:
+                    pipeline.set_partial_timing(p_min, p_int)
+                logger.info("Partial settings updated: min=%.1fs, interval=%.1fs", p_min, p_int)
+            else:
+                writer.write(IPCMessage.error(
+                    "invalid_partial_settings",
+                    f"Need partial_min_s and partial_interval_s as numbers",
+                ))
         else:
             logger.warning("Unknown control action: %s", action)
 

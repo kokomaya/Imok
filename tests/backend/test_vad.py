@@ -152,8 +152,9 @@ class TestVADBasicBehavior:
             _generate_silence(0.5),
         ])
         segments = vad.feed(audio)
-        assert len(segments) == 1
-        assert segments[0].duration_s > 0.2  # at least some speech
+        final_segments = [s for s in segments if not s.is_partial]
+        assert len(final_segments) == 1
+        assert final_segments[0].duration_s > 0.2  # at least some speech
 
     def test_two_speech_segments_separated_by_silence(self) -> None:
         """两段语音被长静音分隔 → 应输出两个语音段。"""
@@ -187,7 +188,8 @@ class TestVADBasicBehavior:
             _generate_silence(0.5),
         ])
         segments = vad.feed(audio)
-        assert len(segments) == 2
+        final_segments = [s for s in segments if not s.is_partial]
+        assert len(final_segments) == 2
 
     def test_flush_outputs_remaining_speech(self) -> None:
         """flush() 应输出当前未完成的语音段。"""
@@ -195,8 +197,9 @@ class TestVADBasicBehavior:
 
         speech = _generate_sine(0.5)
         segments = vad.feed(speech)
-        # No silence → no completed segment from feed
-        assert len(segments) == 0
+        # No silence → no completed (non-partial) segment from feed
+        final_segments = [s for s in segments if not s.is_partial]
+        assert len(final_segments) == 0
 
         # flush should produce the accumulated segment
         flushed = vad.flush()

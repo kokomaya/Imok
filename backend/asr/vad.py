@@ -74,8 +74,8 @@ class VoiceActivityDetector:
         threshold: float = 0.5,
         min_silence_ms: int = 300,
         max_segment_s: float = 15.0,
-        partial_min_s: float = 1.5,
-        partial_interval_s: float = 1.0,
+        partial_min_s: float = 0.3,
+        partial_interval_s: float = 0.3,
     ) -> None:
         if sample_rate not in _SILERO_WINDOW_SIZES:
             raise ValueError(
@@ -196,6 +196,15 @@ class VoiceActivityDetector:
     @property
     def sample_rate(self) -> int:
         return self._sample_rate
+
+    def set_partial_timing(self, partial_min_s: float, partial_interval_s: float) -> None:
+        """运行时更新 partial 参数（不重置状态）。"""
+        self._partial_min_samples = int(partial_min_s * self._sample_rate)
+        self._partial_interval_samples = int(partial_interval_s * self._sample_rate)
+        logger.info(
+            "VAD partial timing updated: min=%.1fs, interval=%.1fs",
+            partial_min_s, partial_interval_s,
+        )
 
     def _reset_state(self) -> None:
         """重置内部跟踪变量。"""

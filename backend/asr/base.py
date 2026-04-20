@@ -91,6 +91,14 @@ class ASREngine(ABC):
             TranscriptionResult 包含转写文本及元信息。
         """
 
+    def transcribe_fast(
+        self,
+        audio: np.ndarray,
+        language: Optional[str] = None,
+    ) -> TranscriptionResult:
+        """快速转写（用于流式 partial）。默认回退到 transcribe()。"""
+        return self.transcribe(audio, language)
+
     @abstractmethod
     def get_supported_languages(self) -> List[str]:
         """返回引擎支持的语言代码列表。"""

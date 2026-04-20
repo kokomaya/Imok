@@ -9,7 +9,7 @@
 
 import { subtitleSettingsStore } from '@/stores/subtitle-settings-store.js';
 
-const emit = defineEmits(['save', 'lock-toggle', 'close']);
+const emit = defineEmits(['save', 'lock-toggle', 'close', 'partial-change']);
 
 const { settings, DEFAULT_SETTINGS } = subtitleSettingsStore;
 
@@ -36,6 +36,14 @@ function onAlwaysOnTopToggle() {
 
 function onChange() {
   emit('save');
+}
+
+function onPartialChange() {
+  emit('save');
+  emit('partial-change', {
+    partialMinSeconds: settings.partialMinSeconds,
+    partialIntervalSeconds: settings.partialIntervalSeconds,
+  });
 }
 
 function onReset() {
@@ -148,7 +156,34 @@ function onReset() {
       </select>
     </div>
 
-    <!-- 行 3：开关控制 -->
+    <!-- 行 3：流式字幕灵敏度 -->
+    <div class="settings-row">
+      <label class="setting-label" title="语音多久后显示首个流式字幕">延迟</label>
+      <input
+        type="range"
+        class="setting-slider"
+        v-model.number="settings.partialMinSeconds"
+        :min="0.3" :max="3.0" :step="0.1"
+        @input="onPartialChange"
+        title="首次流式字幕延迟（秒）：越小越快出现"
+      />
+      <span class="setting-value">{{ settings.partialMinSeconds.toFixed(1) }}s</span>
+    </div>
+
+    <div class="settings-row">
+      <label class="setting-label" title="流式字幕多久更新一次">刷新</label>
+      <input
+        type="range"
+        class="setting-slider"
+        v-model.number="settings.partialIntervalSeconds"
+        :min="0.2" :max="2.0" :step="0.1"
+        @input="onPartialChange"
+        title="流式字幕刷新间隔（秒）：越小更新越频繁"
+      />
+      <span class="setting-value">{{ settings.partialIntervalSeconds.toFixed(1) }}s</span>
+    </div>
+
+    <!-- 行 4：开关控制 -->
     <div class="settings-row settings-toggles">
       <button
         class="toggle-btn"

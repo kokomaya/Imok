@@ -176,6 +176,67 @@ class WhisperEngine(ASREngine):
                 duration_s=duration_s,
             )
 
+    def transcribe_fast(
+        self,
+        audio: np.ndarray,
+        language: Optional[str] = None,
+    ) -> TranscriptionResult:
+        """快速转写 — 用于流式 partial 展示。
+
+        使用贪心解码（beam_size=1）、无 word_timestamps，速度比完整推理快 2-3 倍。
+        牺牲少量准确性换取低延迟，最终结果仍由 transcribe() 给出。
+        """
+        self._ensure_loaded()
+
+        lang = language or self._language or self._cached_language
+        duration_s = len(audio) / _WHISPER_SAMPLE_RATE
+
+        t0 = time.monotonic()
+        try:
+            segments_iter, info = self._model.transcribe(
+                audio,
+                beam_size=1,
+                language=lang,
+                word_timestamps=False,
+                vad_filter=False,
+                condition_on_previous_text=False,
+                without_timestamps=True,
+            )
+
+            full_text_parts: List[str] = []
+            for seg in segments_iter:
+                text = seg.text.strip()
+                if text:
+                    full_text_parts.append(text)
+
+            full_text = " ".join(full_text_parts)
+
+            elapsed = time.monotonic() - t0
+            if not (language or self._language):
+                self._update_language_cache(info.language, info.language_probability)
+
+            logger.debug(
+                "Fast transcribed %.1fs in %.2fs (RTF=%.2f) → '%s'",
+                duration_s, elapsed, elapsed / max(duration_s, 0.01),
+                full_text[:80],
+            )
+
+            return TranscriptionResult(
+                text=full_text,
+                language=info.language,
+                language_probability=info.language_probability,
+                duration_s=duration_s,
+            )
+
+        except Exception:
+            logger.exception("Fast transcription failed for %.1fs audio", duration_s)
+            return TranscriptionResult(
+                text="",
+                language=lang or "unknown",
+                language_probability=0.0,
+                duration_s=duration_s,
+            )
+
     def get_supported_languages(self) -> List[str]:
         return list(_SUPPORTED_LANGUAGES)
 

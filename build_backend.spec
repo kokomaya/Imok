@@ -149,19 +149,51 @@ coll = COLLECT(
     name='imok-backend',
 )
 
-# ── 修复 vcruntime 版本冲突 ──────────────────────────────────
-# PyInstaller 打包的 vcruntime 来自 Python 安装（14.36），但 torch CUDA 12.8
-# 编译所用 MSVC 版本更新（14.44）。c10.dll 的 DllMain 在加载旧版 vcruntime 时
-# 返回 FALSE（WinError 1114）。用系统最新版覆盖即可解决。
+# ── 后处理 ────────────────────────────────────────────────────
 import shutil as _shutil
 
 _dist_internal = Path(SPECPATH) / 'dist' / 'imok-backend' / '_internal'
-_vcr_names = ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll']
-_sys32 = Path(r'C:\Windows\System32')
+_torch_lib = _dist_internal / 'torch' / 'lib'
 
-for _vcr in _vcr_names:
+# 1. 修复 vcruntime 版本冲突
+#    PyInstaller 的 vcruntime 14.36 < torch CUDA 要求的 14.44 → WinError 1114
+_sys32 = Path(r'C:\Windows\System32')
+for _vcr in ('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll'):
     _src = _sys32 / _vcr
     _dst = _dist_internal / _vcr
     if _src.exists() and _dst.exists():
         _shutil.copy2(str(_src), str(_dst))
         print(f'  [post-build] Replaced {_vcr} with system version')
+
+# 2. 移除推理不需要的 CUDA DLL（节省 ~410 MB）
+#    这些 DLL 不在任何必需 DLL 的 PE 导入表中，已通过运行时测试验证。
+_excludable_dlls = [
+    'nvrtc64_120_0.alt.dll',    # 83 MB - CUDA 运行时编译（备选）
+    'nvrtc64_120_0.dll',        # 83 MB - CUDA 运行时编译
+    'nvrtc-builtins64_128.dll', #  6 MB - NVRTC 内置函数
+    'cusolverMg64_11.dll',      # 150 MB - 多 GPU 求解器
+    'curand64_10.dll',          # 69 MB - 随机数生成（推理模式下不需要）
+    'nvperf_host.dll',          # 21 MB - 性能计数器
+    'cufftw64_11.dll',          #  0.2 MB - FFTW 兼容层
+    'caffe2_nvrtc.dll',         # Caffe2 NVRTC
+    'libiompstubs5md.dll',      # OpenMP 存根
+    'nvToolsExt64_1.dll',       # NVIDIA 工具扩展
+]
+_removed_mb = 0
+for _dll in _excludable_dlls:
+    _p = _torch_lib / _dll
+    if _p.exists():
+        _sz = _p.stat().st_size / 1024 / 1024
+        _p.unlink()
+        _removed_mb += _sz
+if _removed_mb > 0:
+    print(f'  [post-build] Removed {len(_excludable_dlls)} unneeded CUDA DLLs ({_removed_mb:.0f} MB saved)')
+
+# 3. 移除推理不需要的 torch 子目录（节省 ~30 MB）
+for _subdir in ('_inductor', 'testing', 'distributed', '_dynamo', 'bin',
+                'ao', 'onnx', '_export', '_functorch', 'fx',
+                'profiler', 'package', 'xpu', 'mps', 'mtia'):
+    _d = _dist_internal / 'torch' / _subdir
+    if _d.exists():
+        _shutil.rmtree(str(_d), ignore_errors=True)
+print('  [post-build] Removed unneeded torch subdirectories')

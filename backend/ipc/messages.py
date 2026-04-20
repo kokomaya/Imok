@@ -55,6 +55,7 @@ class ControlAction(str, Enum):
     TRIGGER_SEGMENT_SUMMARY = "trigger_segment_summary"  # 手动触发段落摘要
     TRIGGER_GLOBAL_SUMMARY = "trigger_global_summary"  # 手动触发全局摘要
     SET_SUMMARY_INTERVAL = "set_summary_interval"  # 设置自动摘要间隔（秒）
+    SET_PARTIAL_SETTINGS = "set_partial_settings"  # 设置流式字幕参数
 
 
 @dataclass
