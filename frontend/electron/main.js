@@ -455,9 +455,36 @@ function setupIPC() {
  * 初始化 PythonBridge 并将事件转发到渲染进程。
  */
 function initPythonBridge() {
+  let bundled, pythonPath, backendDir, projectRoot;
+
+  if (IS_DEV) {
+    // 开发模式：使用本地 venv
+    bundled = false;
+    pythonPath = path.resolve(BACKEND_ROOT, '.venv', 'Scripts', 'python');
+    backendDir = BACKEND_ROOT;
+    projectRoot = BACKEND_ROOT;
+  } else {
+    // 生产模式：projectRoot = resources/（.env、config/ 都在此处）
+    projectRoot = process.resourcesPath;
+    const exePath = path.resolve(projectRoot, 'python-backend', 'imok-backend.exe');
+    if (fs.existsSync(exePath)) {
+      // 完整打包模式：PyInstaller 生成的独立 exe
+      bundled = true;
+      pythonPath = exePath;
+      backendDir = projectRoot;
+    } else {
+      // 轻量模式：用户自行安装的 Python + 源码
+      bundled = false;
+      pythonPath = 'python';
+      backendDir = projectRoot;
+    }
+  }
+
   pythonBridge = new PythonBridge({
-    pythonPath: IS_DEV ? path.resolve(BACKEND_ROOT, '.venv', 'Scripts', 'python') : 'python',
-    backendDir: BACKEND_ROOT,
+    pythonPath,
+    backendDir,
+    bundled,
+    projectRoot,
     source: 'wasapi',
     logLevel: IS_DEV ? 'DEBUG' : 'INFO',
   });

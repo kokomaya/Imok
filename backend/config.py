@@ -24,7 +24,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # ---------------------------------------------------------------------------
 # 项目根目录（backend/ 的父级）
 # ---------------------------------------------------------------------------
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 打包后通过环境变量 IMOK_PROJECT_ROOT 指定根目录，
+# 开发模式下自动从 __file__ 推导。
+_PROJECT_ROOT = Path(os.environ["IMOK_PROJECT_ROOT"]).resolve() \
+    if "IMOK_PROJECT_ROOT" in os.environ \
+    else Path(__file__).resolve().parent.parent
 _BACKEND_ROOT = Path(__file__).resolve().parent
 
 

@@ -1,7 +1,7 @@
 /**
- * electron-builder 打包配置。
+ * electron-builder 打包配置 — 轻量版（不含 Python 运行环境）。
  *
- * 单一职责：定义 Electron 应用的打包和分发参数。
+ * 用户需自行安装 Python 3.12+ 并通过 pip install -r requirements.txt 安装依赖。
  * 参考文档：https://www.electron.build/configuration
  */
 
@@ -11,7 +11,7 @@ module.exports = {
   copyright: 'Copyright © 2026',
 
   directories: {
-    output: 'out',
+    output: 'out-lite',
     buildResources: 'build',
   },
 
@@ -22,10 +22,16 @@ module.exports = {
   ],
 
   extraResources: [
-    // PyInstaller 打包的 Python 后端
+    // Python 后端源码（用户自行安装 Python 环境）
     {
-      from: '../dist/imok-backend',
-      to: 'python-backend',
+      from: '../backend',
+      to: 'backend',
+      filter: ['**/*.py', '!__pycache__/**', '!**/*.pyc'],
+    },
+    // scripts/detect_gpu.py — 被 backend.config 动态导入
+    {
+      from: '../scripts/detect_gpu.py',
+      to: 'scripts/detect_gpu.py',
     },
     // 说话人识别预训练模型
     {
@@ -39,13 +45,23 @@ module.exports = {
       to: 'config',
       filter: [
         '**/*',
-        '!llm_providers.yaml',   // 排除真实配置（含 API 地址）
+        '!llm_providers.yaml',
       ],
+    },
+    // requirements.txt — 用户安装依赖用
+    {
+      from: '../requirements.txt',
+      to: 'requirements.txt',
     },
     // .env.example 供用户参考
     {
       from: '../.env.example',
       to: '.env.example',
+    },
+    // 安装说明
+    {
+      from: '../INSTALL.md',
+      to: 'INSTALL.md',
     },
   ],
 
@@ -59,10 +75,6 @@ module.exports = {
     signAndEditExecutable: false,
   },
 
-  // NSIS 不支持 >2GB 的应用包（32位 mmap 限制），
-  // 因此使用 dir 目标生成便携版，打包后手动压缩分发。
-
-  // macOS 配置（可选，当前主要面向 Windows）
   mac: {
     target: ['dmg'],
   },

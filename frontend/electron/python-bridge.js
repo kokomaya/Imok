@@ -31,6 +31,8 @@ const path = require('path');
  * @property {string} [logLevel='INFO'] - Python 日志级别
  * @property {number} [restartDelayMs=2000] - 异常退出后重启延迟（毫秒）
  * @property {number} [maxRestarts=5] - 最大连续重启次数
+ * @property {boolean} [bundled=false] - 是否使用打包后的 exe（无需 -m backend.main）
+ * @property {string} [projectRoot] - 项目根目录（传递给 Python 的 IMOK_PROJECT_ROOT）
  */
 
 class PythonBridge extends EventEmitter {
@@ -44,6 +46,8 @@ class PythonBridge extends EventEmitter {
     this._backendDir = options.backendDir || path.resolve(__dirname, '..', '..');
     this._source = options.source || 'wasapi';
     this._logLevel = options.logLevel || 'INFO';
+    this._bundled = !!options.bundled;
+    this._projectRoot = options.projectRoot || this._backendDir;
     this._restartDelayMs = options.restartDelayMs ?? 2000;
     this._maxRestarts = options.maxRestarts ?? 5;
 
@@ -154,19 +158,29 @@ class PythonBridge extends EventEmitter {
 
   /** @private */
   _spawn() {
-    const args = [
-      '-m', 'backend.main',
-      '--mode=subprocess',
-      `--source=${this._source}`,
-      `--log-level=${this._logLevel}`,
-    ];
+    const args = this._bundled
+      ? [
+          '--mode=subprocess',
+          `--source=${this._source}`,
+          `--log-level=${this._logLevel}`,
+        ]
+      : [
+          '-m', 'backend.main',
+          '--mode=subprocess',
+          `--source=${this._source}`,
+          `--log-level=${this._logLevel}`,
+        ];
 
     this._process = spawn(this._pythonPath, args, {
       cwd: this._backendDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // Windows 上不使用 shell，避免额外的 cmd.exe 包装
       shell: false,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        IMOK_PROJECT_ROOT: this._projectRoot,
+      },
     });
 
     this._lineBuffer = '';

@@ -60,6 +60,13 @@ config/llm_providers.yaml
 frontend/node_modules/
 frontend/dist/
 frontend/out/
+frontend/out-lite/
+
+# ==================================
+# PyInstaller
+# ==================================
+dist/
+build/imok-backend/
 
 # ==================================
 # Logs
