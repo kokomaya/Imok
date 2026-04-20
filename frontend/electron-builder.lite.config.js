@@ -16,9 +16,15 @@ module.exports = {
   },
 
   files: [
-    'electron/**/*',
-    'dist/**/*',
+    '**/*',
     '!node_modules/**/*',
+    '!src/**/*',
+    '!public/**/*',
+    '!*.config.*',
+    '!*.ts',
+    '!tsconfig*',
+    '!.eslint*',
+    '!.prettier*',
   ],
 
   extraResources: [

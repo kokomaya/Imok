@@ -29,6 +29,58 @@ const BACKEND_ROOT = IS_DEV
   : path.resolve(process.resourcesPath, 'backend');
 
 // ---------------------------------------------------------------
+// Python 路径解析 — 一次性子进程命令用
+// ---------------------------------------------------------------
+
+/**
+ * 解析 Python 可执行文件路径和运行环境（供 execFile 一次性调用）。
+ * 根据打包模式自动选择：PyInstaller exe / 系统 python / venv python。
+ *
+ * @param {string[]} moduleArgs - Python 模块参数, 如 ['backend.audio.list_devices']
+ * @returns {{ pythonPath: string, args: string[], execOpts: object }}
+ */
+function resolvePythonExec(moduleArgs) {
+  if (IS_DEV) {
+    return {
+      pythonPath: path.resolve(BACKEND_ROOT, '.venv', 'Scripts', 'python'),
+      args: ['-m', ...moduleArgs],
+      execOpts: {
+        cwd: BACKEND_ROOT,
+        timeout: 120000,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      },
+    };
+  }
+
+  const projectRoot = process.resourcesPath;
+  const exePath = path.resolve(projectRoot, 'python-backend', 'imok-backend.exe');
+
+  if (fs.existsSync(exePath)) {
+    // 完整打包模式：exe --run <module> [args...]
+    return {
+      pythonPath: exePath,
+      args: ['--run', ...moduleArgs],
+      execOpts: {
+        cwd: projectRoot,
+        timeout: 120000,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot },
+      },
+    };
+  }
+
+  // 轻量模式：系统 python + 源码
+  return {
+    pythonPath: 'python',
+    args: ['-m', ...moduleArgs],
+    execOpts: {
+      cwd: projectRoot,
+      timeout: 120000,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot },
+    },
+  };
+}
+
+// ---------------------------------------------------------------
 // 窗口管理
 // ---------------------------------------------------------------
 
@@ -163,15 +215,13 @@ function setupIPC() {
   // 列出音频设备（一次性 Python 调用）
   ipcMain.handle('audio:list-devices', async () => {
     const { execFile } = require('child_process');
-    const pythonPath = IS_DEV
-      ? path.resolve(BACKEND_ROOT, '.venv', 'Scripts', 'python')
-      : 'python';
+    const { pythonPath, args, execOpts } = resolvePythonExec(['backend.audio.list_devices']);
 
     return new Promise((resolve) => {
       execFile(
         pythonPath,
-        ['-m', 'backend.audio.list_devices'],
-        { cwd: BACKEND_ROOT, timeout: 10000, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
+        args,
+        { ...execOpts },
         (err, stdout, stderr) => {
           if (err) {
             console.error('[audio:list-devices]', stderr || err.message);
@@ -191,15 +241,15 @@ function setupIPC() {
   // 测试音频设备（短录音 + 音量统计）
   ipcMain.handle('audio:test-device', async (_event, { type, index, seconds }) => {
     const { execFile } = require('child_process');
-    const pythonPath = IS_DEV
-      ? path.resolve(BACKEND_ROOT, '.venv', 'Scripts', 'python')
-      : 'python';
+    const { pythonPath, args: baseArgs, execOpts } = resolvePythonExec([
+      'backend.audio.test_device', `--type=${type}`, `--index=${index}`, `--seconds=${seconds || 3}`,
+    ]);
 
     return new Promise((resolve) => {
       execFile(
         pythonPath,
-        ['-m', 'backend.audio.test_device', `--type=${type}`, `--index=${index}`, `--seconds=${seconds || 3}`],
-        { cwd: BACKEND_ROOT, timeout: 15000, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
+        baseArgs,
+        execOpts,
         (err, stdout, stderr) => {
           if (err) {
             console.error('[audio:test-device]', stderr || err.message);
@@ -617,6 +667,7 @@ app.whenReady().then(() => {
     getPythonBridge: () => pythonBridge,
     IS_DEV,
     BACKEND_ROOT,
+    resolvePythonExec,
   });
   appMenu.buildAppMenu();
 

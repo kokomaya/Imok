@@ -31,16 +31,18 @@ let _getPythonBridge = () => null;
 
 let _IS_DEV = false;
 let _BACKEND_ROOT = '';
+let _resolvePythonExec = null;
 
 /**
  * 初始化模块 — 注入主进程上下文。
- * @param {{ getMainWindow: Function, getPythonBridge: Function, IS_DEV: boolean, BACKEND_ROOT: string }} ctx
+ * @param {{ getMainWindow: Function, getPythonBridge: Function, IS_DEV: boolean, BACKEND_ROOT: string, resolvePythonExec: Function }} ctx
  */
 function init(ctx) {
   _getMainWindow = ctx.getMainWindow;
   _getPythonBridge = ctx.getPythonBridge;
   _IS_DEV = ctx.IS_DEV;
   _BACKEND_ROOT = ctx.BACKEND_ROOT;
+  _resolvePythonExec = ctx.resolvePythonExec;
 }
 
 // ---------------------------------------------------------------
@@ -165,15 +167,13 @@ async function fetchDevices() {
   if (cachedDevices) return cachedDevices;
 
   const { execFile } = require('child_process');
-  const pythonPath = _IS_DEV
-    ? path.resolve(_BACKEND_ROOT, '.venv', 'Scripts', 'python')
-    : 'python';
+  const { pythonPath, args, execOpts } = _resolvePythonExec(['backend.audio.list_devices']);
 
   return new Promise((resolve) => {
     execFile(
       pythonPath,
-      ['-m', 'backend.audio.list_devices'],
-      { cwd: _BACKEND_ROOT, timeout: 10000, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
+      args,
+      { ...execOpts },
       (err, stdout) => {
         if (err) { resolve(null); return; }
         try {
@@ -301,15 +301,15 @@ async function testDevice(deviceType) {
   mainWindow?.webContents.send('menu:action', 'device-testing', { type: deviceType, index: deviceIndex });
 
   const { execFile } = require('child_process');
-  const pythonPath = _IS_DEV
-    ? path.resolve(_BACKEND_ROOT, '.venv', 'Scripts', 'python')
-    : 'python';
+  const { pythonPath, args, execOpts } = _resolvePythonExec([
+    'backend.audio.test_device', `--type=${deviceType}`, `--index=${deviceIndex}`, '--seconds=3',
+  ]);
 
   const result = await new Promise((resolve) => {
     execFile(
       pythonPath,
-      ['-m', 'backend.audio.test_device', `--type=${deviceType}`, `--index=${deviceIndex}`, '--seconds=3'],
-      { cwd: _BACKEND_ROOT, timeout: 15000, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
+      args,
+      execOpts,
       (err, stdout) => {
         if (err) return resolve({ ok: false, error: err.message });
         try { return resolve(JSON.parse(stdout)); }

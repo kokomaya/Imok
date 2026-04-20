@@ -32,7 +32,22 @@ else:
 if base_dir not in sys.path:
     sys.path.insert(0, base_dir)
 
-from backend.main import main
+
+def _run_module(module_name):
+    """运行指定的 backend 子模块（等同于 python -m <module>）。"""
+    import importlib
+    import runpy
+    runpy.run_module(module_name, run_name='__main__', alter_sys=True)
+
 
 if __name__ == '__main__':
-    main()
+    # 支持 --run <module> 子命令，用于执行 backend 子模块
+    # 例: imok-backend.exe --run backend.audio.list_devices
+    if len(sys.argv) >= 3 and sys.argv[1] == '--run':
+        module_name = sys.argv[2]
+        # 将 --run <module> 之后的参数传递给子模块
+        sys.argv = sys.argv[2:]
+        _run_module(module_name)
+    else:
+        from backend.main import main
+        main()

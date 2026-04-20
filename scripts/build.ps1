@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Imok Meeting Assistant — 一键打包脚本。
 
@@ -13,9 +13,18 @@
     - Node.js + npm 已安装
     - frontend/node_modules 已安装 (npm install)
 
+.PARAMETER Force
+  强制完全重建 PyInstaller 后端（忽略缓存）。
+
 .EXAMPLE
   .\scripts\build.ps1
+.EXAMPLE
+  .\scripts\build.ps1 -Force
 #>
+
+param(
+    [switch]$Force
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -86,35 +95,61 @@ try {
         & $VenvPip install pyinstaller --quiet
     }
 
-    # 清理旧构建
-    if (Test-Path 'dist\imok-backend') {
-        Remove-Item -Recurse -Force 'dist\imok-backend'
-    }
-    if (Test-Path 'build\imok-backend') {
-        Remove-Item -Recurse -Force 'build\imok-backend'
-    }
-    if (Test-Path 'build\build_backend') {
-        Remove-Item -Recurse -Force 'build\build_backend'
-    }
+    # ── 增量构建：检测后端源码是否有变化 ──
+    # 对比 backend/ + backend_entry.py + build_backend.spec + rthook_torch.py 的最新修改时间
+    $exePath = 'dist\imok-backend\imok-backend.exe'
+    $needRebuild = $true
 
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & $VenvPython -m PyInstaller build_backend.spec --noconfirm --clean 2>&1 | ForEach-Object {
-        $line = $_.ToString()
-        if ($line -match 'ERROR') {
-            Write-Host "  $line" -ForegroundColor Red
+    if ((Test-Path $exePath) -and -not $Force) {
+        $exeTime = (Get-Item $exePath).LastWriteTime
+        $srcFiles = @(
+            Get-ChildItem -Path 'backend' -Recurse -File -Include '*.py'
+            Get-Item 'backend_entry.py'
+            Get-Item 'build_backend.spec'
+            Get-Item 'rthook_torch.py'
+        )
+        $newerFiles = @($srcFiles | Where-Object { $_.LastWriteTime -gt $exeTime })
+        if ($newerFiles.Count -eq 0) {
+            $needRebuild = $false
+            Write-Host '  No backend changes detected — skipping PyInstaller (cached)' -ForegroundColor Green
+            $exeSize = (Get-Item $exePath).Length / 1MB
+            Write-Host "  Using cached: $exePath ($([math]::Round($exeSize, 1)) MB)" -ForegroundColor Green
         } else {
-            Write-Host "  $line" -ForegroundColor DarkGray
+            Write-Host "  $($newerFiles.Count) file(s) changed since last build — rebuilding..." -ForegroundColor DarkGray
         }
     }
-    $ErrorActionPreference = $prevEAP
 
-    if (-not (Test-Path 'dist\imok-backend\imok-backend.exe')) {
-        Write-Error 'PyInstaller build failed — dist\imok-backend\imok-backend.exe not found'
+    if ($needRebuild) {
+        # 清理旧构建
+        if (Test-Path 'dist\imok-backend') {
+            Remove-Item -Recurse -Force 'dist\imok-backend'
+        }
+        if (Test-Path 'build\imok-backend') {
+            Remove-Item -Recurse -Force 'build\imok-backend'
+        }
+        if (Test-Path 'build\build_backend') {
+            Remove-Item -Recurse -Force 'build\build_backend'
+        }
+
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $VenvPython -m PyInstaller build_backend.spec --noconfirm --clean 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            if ($line -match 'ERROR') {
+                Write-Host "  $line" -ForegroundColor Red
+            } else {
+                Write-Host "  $line" -ForegroundColor DarkGray
+            }
+        }
+        $ErrorActionPreference = $prevEAP
+
+        if (-not (Test-Path $exePath)) {
+            Write-Error 'PyInstaller build failed — dist\imok-backend\imok-backend.exe not found'
+        }
+
+        $exeSize = (Get-Item $exePath).Length / 1MB
+        Write-Host "  Backend built: $exePath ($([math]::Round($exeSize, 1)) MB)" -ForegroundColor Green
     }
-
-    $exeSize = (Get-Item 'dist\imok-backend\imok-backend.exe').Length / 1MB
-    Write-Host "  Backend built: dist\imok-backend\imok-backend.exe ($([math]::Round($exeSize, 1)) MB)" -ForegroundColor Green
 } finally {
     Pop-Location
 }
