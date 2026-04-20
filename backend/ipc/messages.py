@@ -23,6 +23,7 @@ class MessageType(str, Enum):
 
     # Python → Electron (stdout)
     TRANSCRIPTION = "transcription"  # ASR 转写结果
+    TRANSCRIPTION_PARTIAL = "transcription_partial"  # ASR 流式中间结果
     STATUS = "status"  # 子进程状态
     ERROR = "error"  # 错误通知
     SEGMENT_SUMMARY = "segment_summary"  # 段落摘要
@@ -192,6 +193,28 @@ class IPCMessage:
             segments=segments or [],
         )
         return cls(type=MessageType.TRANSCRIPTION, data=asdict(data))
+
+    @classmethod
+    def transcription_partial(
+        cls,
+        text: str,
+        *,
+        language: str = "",
+        confidence: float = 0.0,
+        segment_start: float = 0.0,
+        segment_end: float = 0.0,
+        source: str = "",
+    ) -> "IPCMessage":
+        """创建流式中间转写结果消息（语音仍在进行中）。"""
+        data = TranscriptionData(
+            text=text,
+            language=language,
+            confidence=confidence,
+            segment_start=segment_start,
+            segment_end=segment_end,
+            source=source,
+        )
+        return cls(type=MessageType.TRANSCRIPTION_PARTIAL, data=asdict(data))
 
     @classmethod
     def status(

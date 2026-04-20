@@ -43,6 +43,7 @@ const INVOKE_CHANNELS = [
 /** 允许从 main 发往 renderer 的 on 通道 */
 const RECEIVE_CHANNELS = [
   'python:transcription',
+  'python:transcription-partial',
   'python:status',
   'python:error',
   'python:exit',

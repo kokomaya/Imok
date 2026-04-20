@@ -43,6 +43,14 @@ function init(options = {}) {
     }),
   );
 
+  // 流式中间转写 → store（不触发翻译，仅展示）
+  cleanupFns.push(
+    window.electronAPI.on('python:transcription-partial', (data) => {
+      if (subtitleStore.state.paused) return;
+      subtitleStore.updatePartial(data);
+    }),
+  );
+
   // Python 状态 → store
   cleanupFns.push(
     window.electronAPI.on('python:status', (data) => {

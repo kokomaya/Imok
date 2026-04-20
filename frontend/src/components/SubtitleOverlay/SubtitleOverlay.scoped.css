@@ -135,6 +135,10 @@
   border-bottom: none;
 }
 
+.subtitle-entry.partial {
+  opacity: 0.7;
+}
+
 .entry-header {
   display: flex;
   align-items: center;

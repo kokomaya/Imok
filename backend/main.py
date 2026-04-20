@@ -251,6 +251,19 @@ async def _run_subprocess(source_type: str) -> None:
         )
         writer.write(msg)
 
+    def _on_partial_transcription(event: TranscriptionEvent) -> None:
+        """Pipeline 流式中间转写回调 → 写 JSON Lines 到 stdout。"""
+        r = event.result
+        msg = IPCMessage.transcription_partial(
+            r.text,
+            language=r.language,
+            confidence=r.language_probability,
+            segment_start=event.segment_start_time,
+            segment_end=event.segment_end_time,
+            source=event.source_name,
+        )
+        writer.write(msg)
+
     def _on_segment_summary(segment) -> None:
         """段落摘要回调 → 写 JSON Lines 到 stdout。"""
         msg = IPCMessage.segment_summary(
@@ -423,6 +436,7 @@ async def _run_subprocess(source_type: str) -> None:
                 extra_sources=extra_sources,
             )
             pl.on_transcription(_on_transcription)
+            pl.on_partial_transcription(_on_partial_transcription)
 
             # 注册音频电平回调 → IPC 实时推送
             def _on_audio_level(levels):

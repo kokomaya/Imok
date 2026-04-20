@@ -340,3 +340,17 @@
   background: #e3f2fd;
   box-shadow: 0 0 0 1px #90caf9;
 }
+
+.transcription-item.partial {
+  opacity: 0.6;
+}
+
+.typing-cursor {
+  animation: blink-cursor 0.8s infinite;
+  color: #1565c0;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}

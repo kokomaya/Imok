@@ -593,6 +593,10 @@ function initPythonBridge() {
     broadcast('python:transcription', data);
   });
 
+  pythonBridge.on('transcription-partial', (data) => {
+    broadcast('python:transcription-partial', data);
+  });
+
   pythonBridge.on('status', (data) => {
     console.log(`[Main] python:status → state=${data.state} meeting_id=${data.meeting_id || 'N/A'}`);
     broadcast('python:status', data);

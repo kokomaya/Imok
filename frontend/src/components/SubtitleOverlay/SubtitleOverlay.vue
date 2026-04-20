@@ -167,6 +167,7 @@ onUnmounted(() => {
           v-for="entry in displayEntries"
           :key="entry.id"
           class="subtitle-entry"
+          :class="{ partial: entry.isPartial }"
         >
           <div class="entry-header" v-if="settings.showTimestamp">
             <span class="time">{{ formatTime(entry.timestamp) }}</span>
@@ -174,7 +175,10 @@ onUnmounted(() => {
               {{ entry.language }}
             </span>
           </div>
-          <div class="entry-original">{{ entry.original }}</div>
+          <div class="entry-original">
+            {{ entry.original }}
+            <span v-if="entry.isPartial" class="typing-indicator">▍</span>
+          </div>
           <div
             class="entry-translation"
             :class="getStatusClass(entry.translationStatus)"
