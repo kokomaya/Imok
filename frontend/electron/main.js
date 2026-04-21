@@ -629,6 +629,42 @@ function setupIPC() {
       return { ok: false, error: err.message };
     }
   });
+
+  // ── 帮助相关 ─────────────────────────────────────────────
+
+  const { getAppInfo } = require('./app-info');
+  const { shell } = require('electron');
+
+  ipcMain.handle('app:info', () => getAppInfo());
+
+  ipcMain.handle('app:help-doc', () => {
+    try {
+      // 开发模式：项目根目录；生产模式：resources 目录
+      const docPaths = [
+        path.join(BACKEND_ROOT, 'docs', 'user-guide.md'),
+        path.join(__dirname, '..', 'docs', 'user-guide.md'),
+        path.join(process.resourcesPath || '', 'docs', 'user-guide.md'),
+        path.join(path.dirname(app.getPath('exe')), 'docs', 'user-guide.md'),
+      ];
+      for (const p of docPaths) {
+        if (fs.existsSync(p)) {
+          return { ok: true, content: fs.readFileSync(p, 'utf-8') };
+        }
+      }
+      return { ok: false, error: 'Help document not found' };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('shell:open-external', (_event, url) => {
+    // 安全校验：仅允许 https 链接
+    if (typeof url !== 'string' || !url.startsWith('https://')) {
+      return { ok: false, error: 'Only https URLs are allowed' };
+    }
+    shell.openExternal(url);
+    return { ok: true };
+  });
 }
 
 // ---------------------------------------------------------------

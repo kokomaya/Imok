@@ -43,6 +43,9 @@ const INVOKE_CHANNELS = [
   'scenes:save',
   'expression-settings:get',
   'expression-settings:save',
+  'app:info',
+  'app:help-doc',
+  'shell:open-external',
 ];
 
 /** 允许从 main 发往 renderer 的 on 通道 */
@@ -264,6 +267,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   saveExpressionSettings: (settings) => {
     return ipcRenderer.invoke('expression-settings:save', settings);
+  },
+
+  // ── 帮助 ──
+
+  getAppInfo: () => {
+    return ipcRenderer.invoke('app:info');
+  },
+
+  getHelpDoc: () => {
+    return ipcRenderer.invoke('app:help-doc');
+  },
+
+  openExternal: (url) => {
+    return ipcRenderer.invoke('shell:open-external', url);
   },
 
   /**

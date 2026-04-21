@@ -6,10 +6,12 @@ import { MuteAssistPanel } from '@/components/MuteAssistPanel';
 import { SummaryPanel } from '@/components/SummaryPanel';
 import { AudioDevicePanel } from '@/components/AudioDevicePanel';
 import { HistoryPanel } from '@/components/HistoryPanel';
+import { HelpDialog } from '@/components/HelpDialog';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
 import { summaryStore } from '@/stores/summary-store.js';
 import { workspaceStore } from '@/stores/workspace-store.js';
 import { subtitleStore } from '@/stores/subtitle-store.js';
+import { helpStore } from '@/stores/help-store.js';
 import { sceneStore } from '@/stores/scene-store.js';
 import { expressionSettingsStore } from '@/stores/expression-settings-store.js';
 import { useMeetingHistory } from '@/composables/useMeetingHistory.js';
@@ -263,6 +265,15 @@ function handleMenuAction(action, data) {
     case 'save-workspace':
       saveWorkspace();
       break;
+    case 'help-about':
+      helpStore.open('about');
+      break;
+    case 'help-shortcuts':
+      helpStore.open('shortcuts');
+      break;
+    case 'help-doc':
+      helpStore.open('doc');
+      break;
   }
 }
 
@@ -507,6 +518,7 @@ function onEditTranscription(item, event) {
       </section>
     </main>
 
+    <HelpDialog />
   </div>
 </template>
 

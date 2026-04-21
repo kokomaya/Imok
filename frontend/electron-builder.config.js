@@ -53,6 +53,12 @@ module.exports = {
       from: '../.env.example',
       to: '.env.example',
     },
+    // 帮助文档
+    {
+      from: '../docs',
+      to: 'docs',
+      filter: ['**/*.md'],
+    },
   ],
 
   win: {

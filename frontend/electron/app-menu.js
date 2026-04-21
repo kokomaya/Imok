@@ -5,7 +5,7 @@
  * 通过 init() 接收主进程上下文引用，避免循环依赖。
  */
 
-const { Menu } = require('electron');
+const { Menu, shell, dialog } = require('electron');
 const path = require('path');
 
 // ---------------------------------------------------------------
@@ -155,10 +155,86 @@ function buildAppMenu() {
         { role: 'reload', label: '重新加载' },
       ],
     },
+    {
+      label: '帮助',
+      submenu: [
+        {
+          label: '使用帮助',
+          accelerator: 'F1',
+          click: () => send('help-doc'),
+        },
+        {
+          label: '快捷键一览',
+          accelerator: 'CmdOrCtrl+/',
+          click: () => send('help-shortcuts'),
+        },
+        { type: 'separator' },
+        {
+          label: '检查更新…',
+          click: () => handleCheckUpdate(),
+        },
+        {
+          label: '反馈问题',
+          click: () => shell.openExternal('https://github.com/kokomaya/Imok/issues/new'),
+        },
+        { type: 'separator' },
+        {
+          label: '关于 Imok',
+          click: () => send('help-about'),
+        },
+      ],
+    },
   ];
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
+}
+
+// ---------------------------------------------------------------
+// 检查更新
+// ---------------------------------------------------------------
+
+async function handleCheckUpdate() {
+  const { getAppInfo } = require('./app-info');
+  const { checkForUpdate } = require('./update-checker');
+  const win = _getMainWindow();
+
+  try {
+    const result = await checkForUpdate(getAppInfo().version);
+    if (!result) {
+      dialog.showMessageBox(win, {
+        type: 'warning',
+        title: '检查更新',
+        message: '无法连接到 GitHub，请检查网络后重试。',
+      });
+      return;
+    }
+    if (result.hasUpdate) {
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'info',
+        title: '发现新版本',
+        message: `新版本 v${result.latest} 可用！`,
+        detail: result.releaseNotes ? result.releaseNotes.slice(0, 500) : '',
+        buttons: ['前往下载', '稍后再说'],
+        defaultId: 0,
+      });
+      if (response === 0 && result.url) {
+        shell.openExternal(result.url);
+      }
+    } else {
+      dialog.showMessageBox(win, {
+        type: 'info',
+        title: '检查更新',
+        message: '当前已是最新版本。',
+      });
+    }
+  } catch {
+    dialog.showMessageBox(win, {
+      type: 'error',
+      title: '检查更新',
+      message: '检查更新时出错，请稍后重试。',
+    });
+  }
 }
 
 // ---------------------------------------------------------------
