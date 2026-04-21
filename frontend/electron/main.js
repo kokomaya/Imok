@@ -28,7 +28,13 @@ const _origError = console.error;
 function _ensureLogFile() {
   if (!LOG_FILE) {
     try {
-      LOG_FILE = path.join(app.getPath('userData'), 'main-debug.log');
+      // 开发模式：项目根目录/log；生产模式：exe 同级/log
+      const baseDir = app.isPackaged
+        ? path.dirname(app.getPath('exe'))
+        : path.resolve(__dirname, '..', '..');
+      const logDir = path.join(baseDir, 'log');
+      if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+      LOG_FILE = path.join(logDir, 'main-debug.log');
       fs.writeFileSync(LOG_FILE, `=== Imok main process started ${new Date().toISOString()} ===\n`);
     } catch (_) {
       LOG_FILE = false; // 标记为不可用，不再重试
