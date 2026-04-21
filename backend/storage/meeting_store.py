@@ -131,6 +131,25 @@ class MeetingStore:
             summaries.action_items = action_items
             self._write_summaries(meeting_id, summaries)
 
+    def save_transcriptions(
+        self, meeting_id: str, entries: List[TranscriptionEntry]
+    ) -> None:
+        """全量覆写 transcriptions.jsonl（线程安全）。"""
+        file_path = self._meeting_dir(meeting_id) / _TRANSCRIPTIONS_FILE
+        tmp = file_path.with_suffix(".jsonl.tmp")
+        with self._lock:
+            with open(tmp, "w", encoding="utf-8") as f:
+                for e in entries:
+                    f.write(
+                        json.dumps(e.to_dict(), ensure_ascii=False) + "\n"
+                    )
+            tmp.replace(file_path)
+        logger.info(
+            "Saved %d transcriptions for meeting %s",
+            len(entries),
+            meeting_id,
+        )
+
     # ── 查询 ──────────────────────────────────────────────────
 
     def save_speakers(self, meeting_id: str, speaker_data: dict) -> None:

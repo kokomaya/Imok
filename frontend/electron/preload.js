@@ -36,6 +36,7 @@ const INVOKE_CHANNELS = [
   'meeting:load',
   'meeting:delete',
   'meeting:save-summaries',
+  'meeting:save-transcriptions',
   'audio:list-devices',
   'audio:test-device',
   'scenes:list',
@@ -238,8 +239,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('meeting:save-summaries', meetingId, summaries);
   },
 
-  // ── 场景管理 ──
-
+    /**
+     * 保存编辑后的转写记录（全量覆写）。
+     * @param {string} meetingId
+     * @param {Object[]} entries - [{ text, timestamp, language, ... }]
+     * @returns {Promise<{ ok: boolean, error?: string }>}
+     */
+    saveTranscriptions: (meetingId, entries) => {
+      return ipcRenderer.invoke('meeting:save-transcriptions', meetingId, entries);
+    },
   listScenes: () => {
     return ipcRenderer.invoke('scenes:list');
   },

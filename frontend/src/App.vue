@@ -9,6 +9,7 @@ import { HistoryPanel } from '@/components/HistoryPanel';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
 import { summaryStore } from '@/stores/summary-store.js';
 import { workspaceStore } from '@/stores/workspace-store.js';
+import { subtitleStore } from '@/stores/subtitle-store.js';
 import { sceneStore } from '@/stores/scene-store.js';
 import { expressionSettingsStore } from '@/stores/expression-settings-store.js';
 import { useMeetingHistory } from '@/composables/useMeetingHistory.js';
@@ -305,6 +306,14 @@ async function saveWorkspace() {
       const result = await window.electronAPI.saveMeetingSummaries(meetingId, data);
       if (!result.ok) {
         showError('保存失败：' + (result.error || '未知错误'));
+        return;
+      }
+    }
+    if (workspaceStore.state.transcriptionEdited && window.electronAPI?.saveTranscriptions) {
+      const txData = subtitleStore.getTranscriptionsForSave();
+      const result = await window.electronAPI.saveTranscriptions(meetingId, txData);
+      if (!result.ok) {
+        showError('字幕保存失败：' + (result.error || '未知错误'));
         return;
       }
     }

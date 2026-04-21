@@ -9,12 +9,15 @@
 
 import { ref, computed, watch, nextTick } from 'vue';
 import { summaryStore } from '@/stores/summary-store.js';
+import { workspaceStore } from '@/stores/workspace-store.js';
 import {
   generateReviewSummary,
   generateReviewGlobalSummary,
   generateLiveSegmentSummary,
   generateLiveGlobalSummary,
 } from './useSummaryLLM.js';
+import InlineEdit from '@/components/common/InlineEdit.vue';
+import EditableField from '@/components/common/EditableField.vue';
 
 const triggeringSegment = ref(false);
 const triggeringGlobal = ref(false);
@@ -179,6 +182,47 @@ function formatUpdatedTime(segment) {
     hour: '2-digit', minute: '2-digit',
   });
 }
+
+// ── 编辑能力（仅回看模式） ──
+
+/** 回看模式下允许编辑 */
+const editable = computed(() => summaryStore.state.reviewMode);
+
+const ACTION_STATUS_OPTIONS = [
+  { value: 'open', label: '⬜ 待处理' },
+  { value: 'in_progress', label: '🔨 进行中' },
+  { value: 'done', label: '✅ 已完成' },
+];
+
+function onEditSegmentTopics(segId, items) {
+  summaryStore.editSegmentField(segId, 'topics', items);
+}
+
+function onEditSegmentConclusions(segId, items) {
+  summaryStore.editSegmentField(segId, 'conclusions', items);
+}
+
+function onEditSegmentActionItems(segId, items) {
+  summaryStore.editSegmentField(segId, 'actionItems', items);
+}
+
+function onEditGlobalRawText(text) {
+  summaryStore.editGlobalRawText(text);
+}
+
+function onEditConclusion(segmentId, oldText, newText) {
+  const seg = summaryStore.state.segments.find(s => s.id === segmentId);
+  if (!seg) return;
+  const idx = seg.conclusions.indexOf(oldText);
+  if (idx === -1) return;
+  const copy = [...seg.conclusions];
+  copy[idx] = newText;
+  summaryStore.editSegmentField(segmentId, 'conclusions', copy);
+}
+
+function onEditActionItem(index, field, value) {
+  summaryStore.editActionItem(index, field, value);
+}
 </script>
 
 <template>
@@ -248,9 +292,16 @@ function formatUpdatedTime(segment) {
         </button>
       </div>
       <!-- 当前主题 -->
-      <div v-if="currentTopics.length" class="section">
+      <div v-if="currentTopics.length || editable" class="section">
         <div class="section-label">当前讨论主题</div>
-        <div class="topic-list">
+        <EditableField
+          v-if="editable && summaryStore.latestSegment.value"
+          :items="currentTopics"
+          :disabled="!editable"
+          addLabel="+ 添加主题"
+          @update:items="onEditSegmentTopics(summaryStore.latestSegment.value.id, $event)"
+        />
+        <div v-else class="topic-list">
           <span
             v-for="(topic, i) in currentTopics"
             :key="i"
@@ -266,7 +317,14 @@ function formatUpdatedTime(segment) {
         <ul class="conclusion-list">
           <li v-for="(item, i) in allConclusions.slice(0, 10)" :key="i" class="conclusion-item">
             <span class="conclusion-time">{{ item.timeRange }}</span>
-            <span class="conclusion-text">{{ item.text }}</span>
+            <InlineEdit
+              v-if="editable"
+              :modelValue="item.text"
+              tag="span"
+              class="conclusion-text"
+              @update:modelValue="onEditConclusion(item.segmentId, item.text, $event)"
+            />
+            <span v-else class="conclusion-text">{{ item.text }}</span>
           </li>
         </ul>
       </div>
@@ -307,7 +365,15 @@ function formatUpdatedTime(segment) {
             · {{ globalStats.segmentsMerged }} 段 · {{ globalStats.lastUpdated }}
           </span>
         </div>
-        <div class="global-summary-text">{{ globalRawText }}</div>
+        <InlineEdit
+          v-if="editable"
+          :modelValue="globalRawText"
+          multiline
+          tag="div"
+          class="global-summary-text"
+          @update:modelValue="onEditGlobalRawText"
+        />
+        <div v-else class="global-summary-text">{{ globalRawText }}</div>
       </div>
       <!-- 空状态 -->
       <div v-if="!globalRawText && !triggeringGlobal" class="empty-state">
@@ -325,15 +391,51 @@ function formatUpdatedTime(segment) {
           class="action-item"
           :class="getStatusClass(item.status)"
         >
-          <span class="action-status">{{ getStatusIcon(item.status) }}</span>
+          <template v-if="editable">
+            <select
+              class="action-status-select"
+              :value="item.status"
+              @change="onEditActionItem(i, 'status', $event.target.value)"
+            >
+              <option
+                v-for="opt in ACTION_STATUS_OPTIONS"
+                :key="opt.value"
+                :value="opt.value"
+              >{{ opt.label }}</option>
+            </select>
+          </template>
+          <span v-else class="action-status">{{ getStatusIcon(item.status) }}</span>
           <div class="action-body">
-            <div class="action-desc">{{ item.description }}</div>
+            <InlineEdit
+              v-if="editable"
+              :modelValue="item.description"
+              tag="div"
+              class="action-desc"
+              @update:modelValue="onEditActionItem(i, 'description', $event)"
+            />
+            <div v-else class="action-desc">{{ item.description }}</div>
             <div class="action-meta">
-              <span v-if="item.assignee" class="action-assignee">
-                👤 {{ item.assignee }}
+              <span v-if="item.assignee || editable" class="action-assignee">
+                👤
+                <InlineEdit
+                  v-if="editable"
+                  :modelValue="item.assignee"
+                  tag="span"
+                  placeholder="责任人"
+                  @update:modelValue="onEditActionItem(i, 'assignee', $event)"
+                />
+                <template v-else>{{ item.assignee }}</template>
               </span>
-              <span v-if="item.deadline" class="action-deadline">
-                📅 {{ item.deadline }}
+              <span v-if="item.deadline || editable" class="action-deadline">
+                📅
+                <InlineEdit
+                  v-if="editable"
+                  :modelValue="item.deadline"
+                  tag="span"
+                  placeholder="截止时间"
+                  @update:modelValue="onEditActionItem(i, 'deadline', $event)"
+                />
+                <template v-else>{{ item.deadline }}</template>
               </span>
             </div>
           </div>
@@ -360,24 +462,48 @@ function formatUpdatedTime(segment) {
                 <span class="timeline-time">{{ seg.timeRange }}</span>
                 <span class="timeline-updated">{{ formatUpdatedTime(seg) }}</span>
               </div>
-              <div v-if="seg.topics.length" class="timeline-topics">
-                <span
-                  v-for="(t, j) in seg.topics"
-                  :key="j"
-                  class="topic-chip"
-                >
-                  {{ t }}
-                </span>
+              <div v-if="seg.topics.length || editable" class="timeline-topics">
+                <EditableField
+                  v-if="editable"
+                  :items="seg.topics"
+                  addLabel="+ 主题"
+                  @update:items="onEditSegmentTopics(seg.id, $event)"
+                />
+                <template v-else>
+                  <span
+                    v-for="(t, j) in seg.topics"
+                    :key="j"
+                    class="topic-chip"
+                  >
+                    {{ t }}
+                  </span>
+                </template>
               </div>
-              <div v-if="seg.conclusions.length" class="timeline-conclusions">
-                <div v-for="(c, k) in seg.conclusions" :key="k" class="mini-conclusion">
-                  {{ c }}
-                </div>
+              <div v-if="seg.conclusions.length || editable" class="timeline-conclusions">
+                <EditableField
+                  v-if="editable"
+                  :items="seg.conclusions"
+                  addLabel="+ 结论"
+                  @update:items="onEditSegmentConclusions(seg.id, $event)"
+                />
+                <template v-else>
+                  <div v-for="(c, k) in seg.conclusions" :key="k" class="mini-conclusion">
+                    {{ c }}
+                  </div>
+                </template>
               </div>
-              <div v-if="seg.actionItems.length" class="timeline-actions">
-                <div v-for="(a, m) in seg.actionItems" :key="m" class="mini-action">
-                  ⬜ {{ a }}
-                </div>
+              <div v-if="seg.actionItems.length || editable" class="timeline-actions">
+                <EditableField
+                  v-if="editable"
+                  :items="seg.actionItems"
+                  addLabel="+ 行动项"
+                  @update:items="onEditSegmentActionItems(seg.id, $event)"
+                />
+                <template v-else>
+                  <div v-for="(a, m) in seg.actionItems" :key="m" class="mini-action">
+                    ⬜ {{ a }}
+                  </div>
+                </template>
               </div>
             </div>
           </div>

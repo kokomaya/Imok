@@ -5,14 +5,18 @@
  * 单一职责：展示最近 N 条双语字幕，支持自动滚动。
  * 数据来源：subtitleStore（由 ipc-bridge 和 llm-client 驱动）。
  * 外观设置：subtitleSettingsStore（由 SubtitleSettings 面板控制）。
+ * 回看模式下支持内联编辑字幕原文和翻译。
  */
 
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { subtitleStore } from '@/stores/subtitle-store.js';
+import { summaryStore } from '@/stores/summary-store.js';
+import { workspaceStore } from '@/stores/workspace-store.js';
 import { subtitleSettingsStore } from '@/stores/subtitle-settings-store.js';
 import { ipcBridge } from '@/services/ipc-bridge.js';
 import { llmClient } from '@/services/llm-client.js';
 import SubtitleSettings from './SubtitleSettings.vue';
+import InlineEdit from '@/components/common/InlineEdit.vue';
 
 const listRef = ref(null);
 const showSettings = ref(false);
@@ -23,6 +27,19 @@ const { settings, cssVars } = subtitleSettingsStore;
 const displayEntries = computed(() => {
   return subtitleStore.state.entries.slice(-settings.visibleLines);
 });
+
+/** 回看模式下允许编辑字幕 */
+const editable = computed(() => summaryStore.state.reviewMode);
+
+function onEditOriginal(id, newText) {
+  subtitleStore.editOriginal(id, newText);
+  workspaceStore.markTranscriptionEdited();
+}
+
+function onEditTranslation(id, newText) {
+  subtitleStore.editTranslation(id, newText);
+  workspaceStore.markTranscriptionEdited();
+}
 
 // 自动滚动到底部
 watch(displayEntries, async () => {
@@ -174,17 +191,33 @@ onUnmounted(() => {
               {{ entry.language }}
             </span>
           </div>
-          <div class="entry-original">{{ entry.original }}</div>
+          <div class="entry-original">
+            <InlineEdit
+              v-if="editable"
+              :modelValue="entry.original"
+              @update:modelValue="onEditOriginal(entry.id, $event)"
+              tag="span"
+            />
+            <template v-else>{{ entry.original }}</template>
+          </div>
           <div
             class="entry-translation"
             :class="getStatusClass(entry.translationStatus)"
             v-if="settings.showTranslation && (entry.translation || entry.translationStatus === 'translating')"
           >
-            {{ entry.translation }}
-            <span
-              v-if="entry.translationStatus === 'translating'"
-              class="typing-indicator"
-            >▍</span>
+            <InlineEdit
+              v-if="editable"
+              :modelValue="entry.translation"
+              @update:modelValue="onEditTranslation(entry.id, $event)"
+              tag="span"
+            />
+            <template v-else>
+              {{ entry.translation }}
+              <span
+                v-if="entry.translationStatus === 'translating'"
+                class="typing-indicator"
+              >▍</span>
+            </template>
           </div>
           <div
             v-if="settings.showTranslation && entry.translationStatus === 'error'"

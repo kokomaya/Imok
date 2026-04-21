@@ -82,9 +82,14 @@ const state = reactive({
  * 仅用于比较是否有变化，不要求加密安全。
  */
 function _contentHash() {
-  const segPart = state.segments.map((s) => s.rawText).join('|');
+  const segPart = state.segments.map((s) =>
+    `${s.rawText}|${s.topics.join(',')}|${s.conclusions.join(',')}|${s.actionItems.join(',')}`
+  ).join('||');
   const globalPart = state.globalSummary?.rawText || '';
-  return `${segPart}::${globalPart}`;
+  const aiPart = (state.globalSummary?.actionItems || []).map(
+    (a) => `${a.description}|${a.assignee}|${a.deadline}|${a.status}`
+  ).join('||');
+  return `${segPart}::${globalPart}::${aiPart}`;
 }
 
 /**
@@ -258,6 +263,41 @@ function toggleVisible() {
   state.visible = !state.visible;
 }
 
+// ── 编辑 API（回看模式下手动微调摘要）──
+
+/**
+ * 编辑段落摘要的指定字段。
+ * @param {number} segmentId
+ * @param {'topics' | 'conclusions' | 'actionItems' | 'rawText'} field
+ * @param {*} value
+ */
+function editSegmentField(segmentId, field, value) {
+  const seg = state.segments.find(s => s.id === segmentId);
+  if (!seg) return;
+  seg[field] = value;
+}
+
+/**
+ * 编辑全局摘要原文。
+ * @param {string} newText
+ */
+function editGlobalRawText(newText) {
+  if (!state.globalSummary) return;
+  state.globalSummary.rawText = newText;
+}
+
+/**
+ * 编辑 Action Item 的指定字段。
+ * @param {number} index
+ * @param {'description' | 'assignee' | 'deadline' | 'status'} field
+ * @param {string} value
+ */
+function editActionItem(index, field, value) {
+  const item = state.globalSummary?.actionItems?.[index];
+  if (!item) return;
+  item[field] = value;
+}
+
 /**
  * 获取可序列化的摘要数据（用于持久化）。
  * @returns {{ segments: Object[], global_summary: Object|null, action_items: Object[] }}
@@ -310,6 +350,9 @@ export const summaryStore = {
   updateGlobalSummary,
   clearAll,
   toggleVisible,
+  editSegmentField,
+  editGlobalRawText,
+  editActionItem,
   setReviewData,
   clearReviewData,
   setLiveMeetingId,

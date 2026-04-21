@@ -543,6 +543,30 @@ function setupIPC() {
     }
   });
 
+  // 保存编辑后的转写记录（全量覆写 transcriptions.jsonl）
+  ipcMain.handle('meeting:save-transcriptions', (_event, meetingId, entries) => {
+    try {
+      if (!meetingId || typeof meetingId !== 'string') {
+        return { ok: false, error: 'Invalid meeting ID' };
+      }
+      if (!Array.isArray(entries)) {
+        return { ok: false, error: 'Invalid transcription entries' };
+      }
+      const sanitized = path.basename(meetingId);
+      const dir = path.join(meetingsDir, sanitized);
+      if (!fs.existsSync(dir)) return { ok: false, error: 'Meeting not found' };
+
+      const txPath = path.join(dir, 'transcriptions.jsonl');
+      const tmpPath = txPath + '.tmp';
+      const lines = entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+      fs.writeFileSync(tmpPath, lines, 'utf-8');
+      fs.renameSync(tmpPath, txPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // ── 场景管理（独立于会议，全局持久化）───────────────────────
 
   const scenesPath = path.join(BACKEND_ROOT, 'config', 'scenes.json');
