@@ -95,6 +95,8 @@ function resolvePythonExec(moduleArgs) {
   const projectRoot = process.resourcesPath;
   const exePath = path.resolve(projectRoot, 'python-backend', 'imok-backend.exe');
 
+  const exeDir = path.dirname(app.getPath('exe'));
+
   if (fs.existsSync(exePath)) {
     // 完整打包模式：exe --run <module> [args...]
     return {
@@ -103,7 +105,7 @@ function resolvePythonExec(moduleArgs) {
       execOpts: {
         cwd: projectRoot,
         timeout: 120000,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot },
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot, IMOK_PATH_DATA_DIR: path.join(exeDir, 'data') },
       },
     };
   }
@@ -115,7 +117,7 @@ function resolvePythonExec(moduleArgs) {
     execOpts: {
       cwd: projectRoot,
       timeout: 120000,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot },
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot, IMOK_PATH_DATA_DIR: path.join(exeDir, 'data') },
     },
   };
 }
@@ -429,12 +431,20 @@ function setupIPC() {
 
   // ── 会议历史管理 ──────────────────────────────────────────
 
-  const meetingsDir = path.join(BACKEND_ROOT, 'data', 'meetings');
+  // 开发模式：项目根目录/data/meetings
+  // 生产模式：exe 同级/data/meetings（在 resources/ 外部，不会被 electron-builder 清空）
+  const dataRoot = IS_DEV ? BACKEND_ROOT : path.dirname(app.getPath('exe'));
+  const meetingsDir = path.join(dataRoot, 'data', 'meetings');
+  console.log(`[Main] meetingsDir=${meetingsDir} exists=${fs.existsSync(meetingsDir)}`);
+
+  // 确保目录存在（打包后首次运行可能还没有）
+  if (!fs.existsSync(meetingsDir)) {
+    fs.mkdirSync(meetingsDir, { recursive: true });
+  }
 
   // 列出所有会议
   ipcMain.handle('meeting:list', () => {
     try {
-      if (!fs.existsSync(meetingsDir)) return { ok: true, meetings: [] };
       const dirs = fs.readdirSync(meetingsDir, { withFileTypes: true });
       const meetings = [];
       for (const d of dirs) {
@@ -460,6 +470,7 @@ function setupIPC() {
         } catch (_) { /* skip corrupt entries */ }
       }
       meetings.sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
+      console.log(`[Main] meeting:list found ${meetings.length} meetings in ${meetingsDir}`);
       return { ok: true, meetings };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -653,11 +664,15 @@ function initPythonBridge() {
     }
   }
 
+  // 生产模式下数据目录放在 exe 同级，不会被 electron-builder 清空
+  const dataDir = IS_DEV ? '' : path.join(path.dirname(app.getPath('exe')), 'data');
+
   pythonBridge = new PythonBridge({
     pythonPath,
     backendDir,
     bundled,
     projectRoot,
+    dataDir,
     source: 'wasapi',
     logLevel: IS_DEV ? 'DEBUG' : 'INFO',
   });
