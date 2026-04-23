@@ -110,9 +110,11 @@ function resolvePythonExec(moduleArgs) {
     };
   }
 
-  // 轻量模式：系统 python + 源码
+  // 轻量模式：优先使用 resources/.venv，回退到系统 python
+  const venvPython = path.resolve(projectRoot, '.venv', 'Scripts', 'python.exe');
+  const litePython = fs.existsSync(venvPython) ? venvPython : 'python';
   return {
-    pythonPath: 'python',
+    pythonPath: litePython,
     args: ['-m', ...moduleArgs],
     execOpts: {
       cwd: projectRoot,
@@ -693,9 +695,10 @@ function initPythonBridge() {
       pythonPath = exePath;
       backendDir = projectRoot;
     } else {
-      // 轻量模式：用户自行安装的 Python + 源码
+      // 轻量模式：优先使用 resources/.venv，回退到系统 python
       bundled = false;
-      pythonPath = 'python';
+      const venvPython = path.resolve(projectRoot, '.venv', 'Scripts', 'python.exe');
+      pythonPath = fs.existsSync(venvPython) ? venvPython : 'python';
       backendDir = projectRoot;
     }
   }

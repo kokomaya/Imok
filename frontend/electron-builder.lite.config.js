@@ -17,6 +17,8 @@ module.exports = {
 
   files: [
     '**/*',
+    '!out/**/*',
+    '!out-lite/**/*',
     '!node_modules/**/*',
     '!src/**/*',
     '!public/**/*',
@@ -58,6 +60,15 @@ module.exports = {
     {
       from: '../requirements.txt',
       to: 'requirements.txt',
+    },
+    // 一键安装依赖脚本
+    {
+      from: '../scripts/install-lite-deps.ps1',
+      to: 'scripts/install-lite-deps.ps1',
+    },
+    {
+      from: '../scripts/install-lite-deps.cmd',
+      to: 'scripts/install-lite-deps.cmd',
     },
     // .env.example 供用户参考
     {
