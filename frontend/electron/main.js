@@ -66,7 +66,7 @@ const PRELOAD_PATH = path.join(__dirname, 'preload.js');
 const DIST_PATH = path.join(__dirname, '..', 'dist', 'index.html');
 const BACKEND_ROOT = IS_DEV
   ? path.resolve(__dirname, '..', '..')
-  : path.resolve(process.resourcesPath, 'backend');
+  : process.resourcesPath;
 
 // ---------------------------------------------------------------
 // Python 路径解析 — 一次性子进程命令用
