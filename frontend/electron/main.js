@@ -134,6 +134,9 @@ let mainWindow = null;
 /** @type {PythonBridge | null} */
 let pythonBridge = null;
 
+/** Python 后端的当前流水线状态 (ready / running / stopping / stopped) */
+let pythonPipelineState = 'unknown';
+
 /** @type {WindowManager} */
 const windowManager = new WindowManager();
 
@@ -180,6 +183,11 @@ function setupIPC() {
   ipcMain.handle('python:control', (_event, action, extra) => {
     console.log(`[IPC] python:control action=${action} extra=${JSON.stringify(extra)} bridge=${!!pythonBridge} running=${pythonBridge?.isRunning} pid=${pythonBridge?.pid}`);
     if (pythonBridge && pythonBridge.isRunning) {
+      // 摘要触发需要后端流水线处于 running 状态，否则提前返回失败让前端降级
+      if ((action === 'trigger_segment_summary' || action === 'trigger_global_summary') && pythonPipelineState !== 'running') {
+        console.warn(`[IPC] ${action} REJECTED — pipeline not running (state=${pythonPipelineState})`);
+        return { ok: false, error: 'Pipeline not running' };
+      }
       pythonBridge.sendControl(action, extra);
       return { ok: true };
     }
@@ -731,6 +739,7 @@ function initPythonBridge() {
 
   pythonBridge.on('status', (data) => {
     console.log(`[Main] python:status → state=${data.state} meeting_id=${data.meeting_id || 'N/A'}`);
+    pythonPipelineState = data.state || 'unknown';
     broadcast('python:status', data);
   });
 
