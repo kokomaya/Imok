@@ -21,14 +21,16 @@ import EditableField from '@/components/common/EditableField.vue';
 
 const triggeringSegment = ref(false);
 const triggeringGlobal = ref(false);
-const summaryInterval = ref(60);
+const summaryInterval = ref(600);
 
 const INTERVAL_OPTIONS = [
-  { label: '1分钟', value: 60 },
-  { label: '2分钟', value: 120 },
-  { label: '3分钟', value: 180 },
-  { label: '5分钟', value: 300 },
+  { label: '20分钟', value: 1200 },
+  { label: '15分钟', value: 900 },
   { label: '10分钟', value: 600 },
+  { label: '5分钟', value: 300 },
+  { label: '3分钟', value: 180 },
+  { label: '2分钟', value: 120 },
+  { label: '1分钟', value: 60 },
 ];
 
 // ── 确认覆盖 ──
@@ -233,7 +235,7 @@ function onEditActionItem(index, field, value) {
         <span class="panel-title">📋 会议摘要</span>
       </div>
       <div class="header-right">
-        <label v-if="!summaryStore.state.reviewMode" class="interval-label" title="自动摘要间隔（60秒 ~ 10分钟）">
+        <label v-if="!summaryStore.state.reviewMode" class="interval-label" title="自动摘要间隔（60秒 ~ 20分钟）">
           ⏱
           <select class="interval-select" :value="summaryInterval" @change="onIntervalChange">
             <option

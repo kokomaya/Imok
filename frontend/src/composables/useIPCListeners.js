@@ -82,6 +82,10 @@ export function useIPCListeners({ status, meetingActive, meetingStopping, lastMe
           speaker: data.speaker || '',
           source: data.source || '',
           timestamp: new Date().toLocaleTimeString(),
+          epoch: Date.now(),
+          segmentStart: typeof data.segment_start === 'number' ? data.segment_start : null,
+          segmentEnd: typeof data.segment_end === 'number' ? data.segment_end : null,
+          annotations: [],
         });
         summaryStore.addLiveTranscription({
           text: data.text,

@@ -121,6 +121,7 @@ class MeetingPipeline:
 
         self._callbacks: List[TranscriptionCallback] = []
         self._level_callbacks: List[Callable] = []
+        self._audio_callbacks: List[Callable] = []
         self._state = PipelineState.IDLE
         self._stop_event = asyncio.Event()
         self._audio_tasks: List[asyncio.Task] = []
@@ -159,6 +160,13 @@ class MeetingPipeline:
     def on_audio_level(self, callback: Callable) -> None:
         """注册音频电平回调。callback(levels: dict[str, float])"""
         self._level_callbacks.append(callback)
+
+    def on_audio(self, callback: Callable) -> None:
+        """注册原始音频帧回调（用于录音）。callback(source_name: str, samples: np.ndarray)
+
+        samples 为 mono float32 [-1,1]，采样率与音频源一致。
+        """
+        self._audio_callbacks.append(callback)
 
     async def start(self) -> None:
         """启动流水线 — 开始音频采集和识别循环。
@@ -293,6 +301,14 @@ class MeetingPipeline:
                 if chunk is None:
                     await asyncio.sleep(0.01)
                     continue
+
+                # 录音 tap：把原始音频帧转发给录音器等消费者
+                if self._audio_callbacks:
+                    for cb in self._audio_callbacks:
+                        try:
+                            cb(source_name, chunk.data)
+                        except Exception:
+                            logger.debug("Error in audio callback", exc_info=True)
 
                 # 定期发送音频电平 (~5Hz)
                 now = time.monotonic()

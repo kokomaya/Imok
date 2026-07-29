@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useHashRoute } from '@/router.js';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { MuteAssistPanel } from '@/components/MuteAssistPanel';
@@ -7,6 +7,8 @@ import { SummaryPanel } from '@/components/SummaryPanel';
 import { AudioDevicePanel } from '@/components/AudioDevicePanel';
 import { HistoryPanel } from '@/components/HistoryPanel';
 import { HelpDialog } from '@/components/HelpDialog';
+import { TranscriptionPanel } from '@/components/TranscriptionPanel';
+import { RecordingControl } from '@/components/RecordingControl';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
 import { summaryStore } from '@/stores/summary-store.js';
 import { workspaceStore } from '@/stores/workspace-store.js';
@@ -50,16 +52,6 @@ const { checkUnsavedSummary, toggleHistory, loadMeeting, deleteMeeting, backToLi
   transcriptions, historyVisible, historyPanelRef, loadedMeetingId,
 });
 
-// ── 自动滚动 ──
-const transcriptionListRef = ref(null);
-function scrollToBottom() {
-  nextTick(() => {
-    const el = transcriptionListRef.value;
-    if (el) el.scrollTop = el.scrollHeight;
-  });
-}
-watch(transcriptions, scrollToBottom, { deep: true });
-
 /**
  * 根据当前音频开关计算 source_type 参数。
  */
@@ -94,6 +86,10 @@ async function autoLoadLastMeeting() {
       timestamp: t.timestamp
         ? new Date(t.timestamp * 1000).toLocaleTimeString()
         : '',
+      epoch: t.timestamp ? t.timestamp * 1000 : null,
+      segmentStart: typeof t.segment_start === 'number' ? t.segment_start : null,
+      segmentEnd: typeof t.segment_end === 'number' ? t.segment_end : null,
+      annotations: [],
     }));
 
     summaryStore.clearAll();
@@ -341,13 +337,6 @@ function clearTranscriptions() {
   transcriptions.value = [];
 }
 
-function onEditTranscription(item, event) {
-  const newText = event.target.textContent.trim();
-  if (newText !== item.text) {
-    item.text = newText;
-    workspaceStore.markTranscriptionEdited();
-  }
-}
 </script>
 
 <template>
@@ -438,6 +427,9 @@ function onEditTranscription(item, event) {
           title="查看历史会议记录"
         >📂</button>
 
+        <span class="header-sep"></span>
+        <RecordingControl :meeting-active="meetingActive" />
+
         <span class="status-badge" :class="status">{{ status }}</span>
       </div>
     </header>
@@ -477,40 +469,11 @@ function onEditTranscription(item, event) {
       <!-- 闭麦表达助手 -->
       <MuteAssistPanel />
 
-      <section class="transcription-panel">
-        <div class="transcription-header">
-          <h2>实时字幕</h2>
-          <button
-            v-if="transcriptions.length > 0"
-            class="btn-clear-transcriptions"
-            @click="clearTranscriptions"
-            title="清空当前字幕"
-          >
-            🗑 清空
-          </button>
-        </div>
-        <div class="transcription-list" ref="transcriptionListRef">
-          <p v-if="transcriptions.length === 0" class="placeholder">
-            {{ meetingActive ? '等待语音输入…' : '点击「开始会议」启动录制' }}
-          </p>
-          <div
-            v-for="item in transcriptions"
-            :key="item.id"
-            class="transcription-item"
-          >
-            <span class="time">{{ item.timestamp }}</span>
-            <span class="source-icon" v-if="item.source" :title="item.source === 'mic' ? '麦克风' : '系统音频'">{{ item.source === 'mic' ? '🎤' : '🔊' }}</span>
-            <span class="speaker" v-if="item.speaker">[{{ item.speaker }}]</span>
-            <span class="lang" v-if="item.language">[{{ item.language }}]</span>
-            <span
-              class="text"
-              contenteditable="true"
-              @blur="onEditTranscription(item, $event)"
-              @keydown.enter.prevent="$event.target.blur()"
-            >{{ item.text }}</span>
-          </div>
-        </div>
-      </section>
+      <TranscriptionPanel
+        :transcriptions="transcriptions"
+        :meeting-active="meetingActive"
+        @clear="clearTranscriptions"
+      />
     </main>
 
     <HelpDialog />
