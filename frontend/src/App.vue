@@ -14,6 +14,7 @@ import { subtitleStore } from '@/stores/subtitle-store.js';
 import { helpStore } from '@/stores/help-store.js';
 import { sceneStore } from '@/stores/scene-store.js';
 import { expressionSettingsStore } from '@/stores/expression-settings-store.js';
+import { notificationStore } from '@/stores/notification-store.js';
 import { useMeetingHistory } from '@/composables/useMeetingHistory.js';
 import { useIPCListeners } from '@/composables/useIPCListeners.js';
 
@@ -31,18 +32,12 @@ const meetingActive = ref(false);
 const meetingStopping = ref(false);
 const lastMeetingInfo = ref(null);
 
-// ── 错误通知 ──
-const errorMessage = ref('');
-let errorTimer = null;
-
+// ── 错误通知（统一走全局 notificationStore，使任意模块都能推送错误）──
 function showError(msg) {
-  errorMessage.value = msg;
-  if (errorTimer) clearTimeout(errorTimer);
-  errorTimer = setTimeout(() => { errorMessage.value = ''; }, 8000);
+  notificationStore.notifyError(msg);
 }
 function dismissError() {
-  errorMessage.value = '';
-  if (errorTimer) clearTimeout(errorTimer);
+  notificationStore.dismiss();
 }
 
 // ── 会议历史 ──
@@ -448,8 +443,8 @@ function onEditTranscription(item, event) {
     </header>
 
     <!-- 错误通知条 -->
-    <div v-if="errorMessage" class="error-bar">
-      <span>⚠ {{ errorMessage }}</span>
+    <div v-if="notificationStore.state.errorMessage" class="error-bar">
+      <span>⚠ {{ notificationStore.state.errorMessage }}</span>
       <button class="error-dismiss" @click="dismissError">✕</button>
     </div>
 

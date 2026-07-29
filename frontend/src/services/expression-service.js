@@ -10,6 +10,8 @@
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
 import { sceneStore } from '@/stores/scene-store.js';
 import { expressionSettingsStore } from '@/stores/expression-settings-store.js';
+import { notificationStore } from '@/stores/notification-store.js';
+import { formatLLMError } from '@/services/llm-error.js';
 import { buildExpressionPrompt, EXPRESSION_SYSTEM_PROMPT } from '@/prompts/index.js';
 
 // ---------------------------------------------------------------
@@ -75,7 +77,9 @@ async function express(inputText) {
     muteAssistStore.finishExpression(id);
   } catch (err) {
     console.error('[expression-service] Request failed:', err.message);
-    muteAssistStore.markError(id);
+    const msg = formatLLMError(err.message, '闭麦表达生成失败');
+    muteAssistStore.markError(id, msg);
+    notificationStore.notifyError(msg);
   }
 }
 

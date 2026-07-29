@@ -258,7 +258,7 @@ const activeSceneId = computed(() => sceneStore.state.activeSceneId);
           <span class="output-placeholder">英文结果将显示在这里…</span>
         </template>
         <template v-else-if="store.state.outputStatus === 'error'">
-          <span class="output-error">请求失败，请检查 LLM 配置后重试</span>
+          <span class="output-error">{{ store.state.errorMessage || '请求失败，请检查 LLM 配置后重试' }}</span>
         </template>
         <!-- 多候选展示 -->
         <template v-else-if="hasCandidates && store.state.outputStatus === 'done'">

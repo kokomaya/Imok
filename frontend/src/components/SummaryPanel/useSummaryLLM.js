@@ -6,6 +6,8 @@
  */
 
 import { summaryStore } from '@/stores/summary-store.js';
+import { notificationStore } from '@/stores/notification-store.js';
+import { formatLLMError } from '@/services/llm-error.js';
 import { SUMMARY_SYSTEM_PROMPT, MERGE_SYSTEM_PROMPT } from '@/prompts/index.js';
 
 // ── 解析 LLM 输出 ──
@@ -50,26 +52,35 @@ function parseActionItem(item) {
 
 /**
  * 调用 LLM，优先使用流式接口（实时显示生成文本），不支持时回退到非流式。
+ * 错误上报收敛在此单一出口：失败时直接将可读错误推送到全局错误栏，
+ * 调用方无需重复处理。
  * @param {{ messages: Array, temperature?: number, max_tokens?: number }} params
+ * @param {string} errorLabel 失败时面向用户的错误前缀
  * @returns {Promise<{ ok: boolean, content?: string, error?: string }>}
  */
-async function _chatWithStreaming(params) {
+async function _chatWithStreaming(params, errorLabel = 'LLM 请求失败') {
+  let result;
   if (window.electronAPI?.llmChatStream) {
     summaryStore.startGenerating();
     try {
-      const result = await window.electronAPI.llmChatStream(params, {
+      result = await window.electronAPI.llmChatStream(params, {
         onChunk: (delta) => summaryStore.appendGeneratingChunk(delta),
       });
-      return result;
     } finally {
       summaryStore.stopGenerating();
     }
+  } else if (window.electronAPI?.llmChat) {
+    // 回退：非流式
+    result = await window.electronAPI.llmChat(params);
+  } else {
+    result = { ok: false, error: 'No LLM API available' };
   }
-  // 回退：非流式
-  if (window.electronAPI?.llmChat) {
-    return window.electronAPI.llmChat(params);
+
+  if (!result.ok) {
+    console.error(`[SummaryLLM] ${errorLabel}:`, result.error);
+    notificationStore.notifyError(formatLLMError(result.error, errorLabel));
   }
-  return { ok: false, error: 'No LLM API available' };
+  return result;
 }
 
 // ── 回看模式：通过 llm:chat 生成摘要 ──
@@ -88,7 +99,7 @@ export async function generateReviewSummary() {
     ],
     temperature: 0.3,
     max_tokens: 1024,
-  });
+  }, '摘要生成失败');
 
   if (result.ok && result.content) {
     const parsed = parseSummaryResponse(result.content);
@@ -99,8 +110,6 @@ export async function generateReviewSummary() {
       action_items: parsed.action_items,
       raw_text: result.content,
     });
-  } else {
-    console.error('[SummaryPanel] LLM error:', result.error);
   }
 }
 
@@ -125,7 +134,7 @@ export async function generateReviewGlobalSummary() {
     ],
     temperature: 0.3,
     max_tokens: 1500,
-  });
+  }, '总结生成失败');
 
   if (result.ok && result.content) {
     const parsed = parseSummaryResponse(result.content);
@@ -135,8 +144,6 @@ export async function generateReviewGlobalSummary() {
       merge_count: 1,
       action_items: parsed.action_items.map(parseActionItem),
     });
-  } else {
-    console.error('[SummaryPanel] LLM merge error:', result.error);
   }
 }
 
@@ -156,7 +163,7 @@ export async function generateLiveSegmentSummary() {
     ],
     temperature: 0.3,
     max_tokens: 1024,
-  });
+  }, '摘要生成失败');
 
   if (result.ok && result.content) {
     const parsed = parseSummaryResponse(result.content);
@@ -167,8 +174,6 @@ export async function generateLiveSegmentSummary() {
       action_items: parsed.action_items,
       raw_text: result.content,
     });
-  } else {
-    console.error('[SummaryPanel] Fallback LLM error:', result.error);
   }
 }
 
@@ -186,7 +191,7 @@ export async function generateLiveGlobalSummary() {
     ],
     temperature: 0.3,
     max_tokens: 1500,
-  });
+  }, '总结生成失败');
 
   if (result.ok && result.content) {
     const parsed = parseSummaryResponse(result.content);
@@ -196,7 +201,5 @@ export async function generateLiveGlobalSummary() {
       merge_count: 1,
       action_items: parsed.action_items.map(parseActionItem),
     });
-  } else {
-    console.error('[SummaryPanel] Fallback LLM merge error:', result.error);
   }
 }

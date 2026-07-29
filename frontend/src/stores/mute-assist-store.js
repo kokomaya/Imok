@@ -43,6 +43,9 @@ const state = reactive({
   /** 当前请求状态 */
   outputStatus: 'idle', // 'idle' | 'streaming' | 'done' | 'error'
 
+  /** 最近一次错误的可读信息（outputStatus === 'error' 时展示） */
+  errorMessage: '',
+
   /** 历史记录 */
   /** @type {ExpressionEntry[]} */
   history: [],
@@ -66,6 +69,7 @@ function startExpression(input) {
   state.outputText = '';
   state.candidates = [];
   state.outputStatus = 'streaming';
+  state.errorMessage = '';
   state.copied = false;
   return id;
 }
@@ -118,10 +122,12 @@ function finishExpression(id) {
 /**
  * 标记错误。
  * @param {number} id
+ * @param {string} [message] 面向用户的可读错误信息
  */
-function markError(id) {
+function markError(id, message = '') {
   if (state.activeId !== id) return;
   state.outputStatus = 'error';
+  state.errorMessage = message;
 }
 
 /**
@@ -173,6 +179,7 @@ function resetOutput() {
   state.outputText = '';
   state.candidates = [];
   state.outputStatus = 'idle';
+  state.errorMessage = '';
   state.copied = false;
 }
 
