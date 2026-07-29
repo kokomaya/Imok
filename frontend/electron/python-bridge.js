@@ -33,6 +33,7 @@ const path = require('path');
  * @property {number} [maxRestarts=5] - 最大连续重启次数
  * @property {boolean} [bundled=false] - 是否使用打包后的 exe（无需 -m backend.main）
  * @property {string} [projectRoot] - 项目根目录（传递给 Python 的 IMOK_PROJECT_ROOT）
+ * @property {string} [dataDir] - 数据目录（传递给 Python 的 IMOK_PATH_DATA_DIR，覆盖默认 data_dir）
  */
 
 class PythonBridge extends EventEmitter {
@@ -48,6 +49,7 @@ class PythonBridge extends EventEmitter {
     this._logLevel = options.logLevel || 'INFO';
     this._bundled = !!options.bundled;
     this._projectRoot = options.projectRoot || this._backendDir;
+    this._dataDir = options.dataDir || '';
     this._restartDelayMs = options.restartDelayMs ?? 2000;
     this._maxRestarts = options.maxRestarts ?? 5;
 
@@ -186,6 +188,7 @@ class PythonBridge extends EventEmitter {
         ...process.env,
         PYTHONIOENCODING: 'utf-8',
         IMOK_PROJECT_ROOT: this._projectRoot,
+        ...(this._dataDir ? { IMOK_PATH_DATA_DIR: this._dataDir } : {}),
       },
     });
 

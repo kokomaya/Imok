@@ -199,6 +199,7 @@ async def _run_subprocess(source_type: str) -> None:
     5. stdin EOF 或 SIGINT → 优雅退出
     """
     from backend.config import get_settings, load_llm_provider_config
+    from backend.audio.recorder import AudioRecorder
     from backend.ipc.messages import (
         ControlAction,
         IPCMessage,
@@ -234,6 +235,10 @@ async def _run_subprocess(source_type: str) -> None:
     # 用户选择的音频设备索引（None = 自动/默认）
     selected_loopback_device: int | None = None
     selected_mic_device: int | None = None
+    # 录音状态（整场会议共享一个录音器，跨音频源切换保持连续）
+    recorder = None  # type: Optional[AudioRecorder]
+    recording_enabled = False
+    recording_mode = "silence"  # 'silence' | 'skip'
     # 持有事件循环引用，供从 reader 线程安全调度协程
     main_loop = asyncio.get_running_loop()
 
@@ -355,7 +360,7 @@ async def _run_subprocess(source_type: str) -> None:
         当 src_type == 'both' 时，为每个音频源创建独立的 VAD 实例，
         各自独立检测语音，共享同一个 ASR 引擎。
         """
-        nonlocal summary_coordinator, llm_client, meeting_id, speaker_tracker
+        nonlocal summary_coordinator, llm_client, meeting_id, speaker_tracker, recorder
 
         writer.write(IPCMessage.status(ProcessState.LOADING, message="Loading models..."))
 
@@ -444,6 +449,22 @@ async def _run_subprocess(source_type: str) -> None:
             except Exception:
                 logger.exception("Failed to initialize meeting storage, continuing without persistence")
                 meeting_id = None
+
+            # 录音器：整场会议共享一个，跨音源切换保持连续（首次启用时创建）
+            if meeting_id is not None:
+                if recorder is None:
+                    try:
+                        rec_path = meeting_store.get_meeting_dir(meeting_id) / "recording.wav"
+                        recorder = AudioRecorder(rec_path, get_settings().audio.sample_rate)
+                        recorder.set_mute_mode(recording_mode)
+                        recorder.set_muted(not recording_enabled)
+                        if recording_enabled:
+                            recorder.open()
+                    except Exception:
+                        logger.exception("Failed to initialize recorder")
+                        recorder = None
+                if recorder is not None:
+                    pl.on_audio(recorder.feed)
 
             # 初始化总结模块（LLM 客户端 + 协调器）
             try:
@@ -586,6 +607,20 @@ async def _run_subprocess(source_type: str) -> None:
             selected_mic_device = int(mic) if mic is not None else None
             logger.info("Device selection updated: loopback=%s, mic=%s",
                         selected_loopback_device, selected_mic_device)
+        elif action == ControlAction.SET_RECORDING:
+            nonlocal recording_enabled, recording_mode
+            enabled = bool(message.data.get("recording", False))
+            mode = message.data.get("mode", recording_mode)
+            recording_enabled = enabled
+            if mode in ("silence", "skip"):
+                recording_mode = mode
+            # 应用到当前录音器（若会议进行中）
+            if recorder is not None:
+                recorder.set_mute_mode(recording_mode)
+                if enabled and not recorder.is_open:
+                    recorder.open()
+                recorder.set_muted(not enabled)
+            logger.info("Recording set: enabled=%s mode=%s", recording_enabled, recording_mode)
         else:
             logger.warning("Unknown control action: %s", action)
 
@@ -600,8 +635,16 @@ async def _run_subprocess(source_type: str) -> None:
                 pass  # 错误已在 _start_pipeline 中通过 IPC 报告
 
     async def _do_stop() -> None:
+        nonlocal recorder
         async with _pipeline_lock:
             await _stop_pipeline()
+            # 会议结束：关闭录音器（音频源切换走 _do_restart，不会到这里）
+            if recorder is not None:
+                try:
+                    recorder.close()
+                except Exception:
+                    logger.exception("Error closing recorder")
+                recorder = None
 
     async def _do_restart(new_source: str, *, resume_meeting_id: str = "") -> None:
         nonlocal pipeline
@@ -659,6 +702,12 @@ async def _run_subprocess(source_type: str) -> None:
         pass
     finally:
         await _stop_pipeline()
+        if recorder is not None:
+            try:
+                recorder.close()
+            except Exception:
+                logger.exception("Error closing recorder on shutdown")
+            recorder = None
         await reader.stop()
         watcher_task.cancel()
         try:

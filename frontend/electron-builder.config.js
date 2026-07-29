@@ -17,6 +17,8 @@ module.exports = {
 
   files: [
     '**/*',
+    '!out/**/*',
+    '!out-lite/**/*',
     '!node_modules/**/*',
     '!src/**/*',
     '!public/**/*',
@@ -52,6 +54,12 @@ module.exports = {
     {
       from: '../.env.example',
       to: '.env.example',
+    },
+    // 帮助文档
+    {
+      from: '../docs',
+      to: 'docs',
+      filter: ['**/*.md'],
     },
   ],
 

@@ -36,8 +36,16 @@ const INVOKE_CHANNELS = [
   'meeting:load',
   'meeting:delete',
   'meeting:save-summaries',
+  'meeting:save-transcriptions',
   'audio:list-devices',
   'audio:test-device',
+  'scenes:list',
+  'scenes:save',
+  'expression-settings:get',
+  'expression-settings:save',
+  'app:info',
+  'app:help-doc',
+  'shell:open-external',
 ];
 
 /** 允许从 main 发往 renderer 的 on 通道 */
@@ -232,6 +240,47 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   saveMeetingSummaries: (meetingId, summaries) => {
     return ipcRenderer.invoke('meeting:save-summaries', meetingId, summaries);
+  },
+
+    /**
+     * 保存编辑后的转写记录（全量覆写）。
+     * @param {string} meetingId
+     * @param {Object[]} entries - [{ text, timestamp, language, ... }]
+     * @returns {Promise<{ ok: boolean, error?: string }>}
+     */
+    saveTranscriptions: (meetingId, entries) => {
+      return ipcRenderer.invoke('meeting:save-transcriptions', meetingId, entries);
+    },
+  listScenes: () => {
+    return ipcRenderer.invoke('scenes:list');
+  },
+
+  saveScenes: (scenes) => {
+    return ipcRenderer.invoke('scenes:save', scenes);
+  },
+
+  // ── 表达设置 ──
+
+  getExpressionSettings: () => {
+    return ipcRenderer.invoke('expression-settings:get');
+  },
+
+  saveExpressionSettings: (settings) => {
+    return ipcRenderer.invoke('expression-settings:save', settings);
+  },
+
+  // ── 帮助 ──
+
+  getAppInfo: () => {
+    return ipcRenderer.invoke('app:info');
+  },
+
+  getHelpDoc: () => {
+    return ipcRenderer.invoke('app:help-doc');
+  },
+
+  openExternal: (url) => {
+    return ipcRenderer.invoke('shell:open-external', url);
   },
 
   /**

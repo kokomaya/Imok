@@ -28,7 +28,13 @@ const _origError = console.error;
 function _ensureLogFile() {
   if (!LOG_FILE) {
     try {
-      LOG_FILE = path.join(app.getPath('userData'), 'main-debug.log');
+      // 开发模式：项目根目录/log；生产模式：exe 同级/log
+      const baseDir = app.isPackaged
+        ? path.dirname(app.getPath('exe'))
+        : path.resolve(__dirname, '..', '..');
+      const logDir = path.join(baseDir, 'log');
+      if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+      LOG_FILE = path.join(logDir, 'main-debug.log');
       fs.writeFileSync(LOG_FILE, `=== Imok main process started ${new Date().toISOString()} ===\n`);
     } catch (_) {
       LOG_FILE = false; // 标记为不可用，不再重试
@@ -60,7 +66,7 @@ const PRELOAD_PATH = path.join(__dirname, 'preload.js');
 const DIST_PATH = path.join(__dirname, '..', 'dist', 'index.html');
 const BACKEND_ROOT = IS_DEV
   ? path.resolve(__dirname, '..', '..')
-  : path.resolve(process.resourcesPath, 'backend');
+  : process.resourcesPath;
 
 // ---------------------------------------------------------------
 // Python 路径解析 — 一次性子进程命令用
@@ -89,6 +95,8 @@ function resolvePythonExec(moduleArgs) {
   const projectRoot = process.resourcesPath;
   const exePath = path.resolve(projectRoot, 'python-backend', 'imok-backend.exe');
 
+  const exeDir = path.dirname(app.getPath('exe'));
+
   if (fs.existsSync(exePath)) {
     // 完整打包模式：exe --run <module> [args...]
     return {
@@ -97,19 +105,21 @@ function resolvePythonExec(moduleArgs) {
       execOpts: {
         cwd: projectRoot,
         timeout: 120000,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot },
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot, IMOK_PATH_DATA_DIR: path.join(exeDir, 'data') },
       },
     };
   }
 
-  // 轻量模式：系统 python + 源码
+  // 轻量模式：优先使用 resources/.venv，回退到系统 python
+  const venvPython = path.resolve(projectRoot, '.venv', 'Scripts', 'python.exe');
+  const litePython = fs.existsSync(venvPython) ? venvPython : 'python';
   return {
-    pythonPath: 'python',
+    pythonPath: litePython,
     args: ['-m', ...moduleArgs],
     execOpts: {
       cwd: projectRoot,
       timeout: 120000,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot },
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', IMOK_PROJECT_ROOT: projectRoot, IMOK_PATH_DATA_DIR: path.join(exeDir, 'data') },
     },
   };
 }
@@ -123,6 +133,9 @@ let mainWindow = null;
 
 /** @type {PythonBridge | null} */
 let pythonBridge = null;
+
+/** Python 后端的当前流水线状态 (ready / running / stopping / stopped) */
+let pythonPipelineState = 'unknown';
 
 /** @type {WindowManager} */
 const windowManager = new WindowManager();
@@ -170,6 +183,11 @@ function setupIPC() {
   ipcMain.handle('python:control', (_event, action, extra) => {
     console.log(`[IPC] python:control action=${action} extra=${JSON.stringify(extra)} bridge=${!!pythonBridge} running=${pythonBridge?.isRunning} pid=${pythonBridge?.pid}`);
     if (pythonBridge && pythonBridge.isRunning) {
+      // 摘要触发需要后端流水线处于 running 状态，否则提前返回失败让前端降级
+      if ((action === 'trigger_segment_summary' || action === 'trigger_global_summary') && pythonPipelineState !== 'running') {
+        console.warn(`[IPC] ${action} REJECTED — pipeline not running (state=${pythonPipelineState})`);
+        return { ok: false, error: 'Pipeline not running' };
+      }
       pythonBridge.sendControl(action, extra);
       return { ok: true };
     }
@@ -423,12 +441,20 @@ function setupIPC() {
 
   // ── 会议历史管理 ──────────────────────────────────────────
 
-  const meetingsDir = path.join(BACKEND_ROOT, 'data', 'meetings');
+  // 开发模式：项目根目录/data/meetings
+  // 生产模式：exe 同级/data/meetings（在 resources/ 外部，不会被 electron-builder 清空）
+  const dataRoot = IS_DEV ? BACKEND_ROOT : path.dirname(app.getPath('exe'));
+  const meetingsDir = path.join(dataRoot, 'data', 'meetings');
+  console.log(`[Main] meetingsDir=${meetingsDir} exists=${fs.existsSync(meetingsDir)}`);
+
+  // 确保目录存在（打包后首次运行可能还没有）
+  if (!fs.existsSync(meetingsDir)) {
+    fs.mkdirSync(meetingsDir, { recursive: true });
+  }
 
   // 列出所有会议
   ipcMain.handle('meeting:list', () => {
     try {
-      if (!fs.existsSync(meetingsDir)) return { ok: true, meetings: [] };
       const dirs = fs.readdirSync(meetingsDir, { withFileTypes: true });
       const meetings = [];
       for (const d of dirs) {
@@ -454,6 +480,7 @@ function setupIPC() {
         } catch (_) { /* skip corrupt entries */ }
       }
       meetings.sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
+      console.log(`[Main] meeting:list found ${meetings.length} meetings in ${meetingsDir}`);
       return { ok: true, meetings };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -536,6 +563,118 @@ function setupIPC() {
       return { ok: false, error: err.message };
     }
   });
+
+  // 保存编辑后的转写记录（全量覆写 transcriptions.jsonl）
+  ipcMain.handle('meeting:save-transcriptions', (_event, meetingId, entries) => {
+    try {
+      if (!meetingId || typeof meetingId !== 'string') {
+        return { ok: false, error: 'Invalid meeting ID' };
+      }
+      if (!Array.isArray(entries)) {
+        return { ok: false, error: 'Invalid transcription entries' };
+      }
+      const sanitized = path.basename(meetingId);
+      const dir = path.join(meetingsDir, sanitized);
+      if (!fs.existsSync(dir)) return { ok: false, error: 'Meeting not found' };
+
+      const txPath = path.join(dir, 'transcriptions.jsonl');
+      const tmpPath = txPath + '.tmp';
+      const lines = entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+      fs.writeFileSync(tmpPath, lines, 'utf-8');
+      fs.renameSync(tmpPath, txPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // ── 场景管理（独立于会议，全局持久化）───────────────────────
+
+  const scenesPath = path.join(BACKEND_ROOT, 'config', 'scenes.json');
+
+  ipcMain.handle('scenes:list', () => {
+    try {
+      if (!fs.existsSync(scenesPath)) return { ok: true, scenes: [] };
+      const data = JSON.parse(fs.readFileSync(scenesPath, 'utf-8'));
+      return { ok: true, scenes: data.scenes || [] };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('scenes:save', (_event, scenes) => {
+    try {
+      if (!Array.isArray(scenes)) return { ok: false, error: 'Invalid scenes data' };
+      const tmpPath = scenesPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify({ scenes }, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, scenesPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // ── 表达设置（候选条数等，全局持久化）─────────────────────
+
+  const exprSettingsPath = path.join(BACKEND_ROOT, 'config', 'expression_settings.json');
+
+  ipcMain.handle('expression-settings:get', () => {
+    try {
+      if (!fs.existsSync(exprSettingsPath)) return { ok: true, settings: {} };
+      const data = JSON.parse(fs.readFileSync(exprSettingsPath, 'utf-8'));
+      return { ok: true, settings: data };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('expression-settings:save', (_event, settings) => {
+    try {
+      if (!settings || typeof settings !== 'object') return { ok: false, error: 'Invalid settings' };
+      const tmpPath = exprSettingsPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(settings, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, exprSettingsPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // ── 帮助相关 ─────────────────────────────────────────────
+
+  const { getAppInfo } = require('./app-info');
+  const { shell } = require('electron');
+
+  ipcMain.handle('app:info', () => getAppInfo());
+
+  ipcMain.handle('app:help-doc', () => {
+    try {
+      // 开发模式：项目根目录；生产模式：resources 目录
+      const docPaths = [
+        path.join(BACKEND_ROOT, 'docs', 'user-guide.md'),
+        path.join(__dirname, '..', 'docs', 'user-guide.md'),
+        path.join(process.resourcesPath || '', 'docs', 'user-guide.md'),
+        path.join(path.dirname(app.getPath('exe')), 'docs', 'user-guide.md'),
+      ];
+      for (const p of docPaths) {
+        if (fs.existsSync(p)) {
+          return { ok: true, content: fs.readFileSync(p, 'utf-8') };
+        }
+      }
+      return { ok: false, error: 'Help document not found' };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('shell:open-external', (_event, url) => {
+    // 安全校验：仅允许 https 链接
+    if (typeof url !== 'string' || !url.startsWith('https://')) {
+      return { ok: false, error: 'Only https URLs are allowed' };
+    }
+    shell.openExternal(url);
+    return { ok: true };
+  });
 }
 
 // ---------------------------------------------------------------
@@ -564,18 +703,23 @@ function initPythonBridge() {
       pythonPath = exePath;
       backendDir = projectRoot;
     } else {
-      // 轻量模式：用户自行安装的 Python + 源码
+      // 轻量模式：优先使用 resources/.venv，回退到系统 python
       bundled = false;
-      pythonPath = 'python';
+      const venvPython = path.resolve(projectRoot, '.venv', 'Scripts', 'python.exe');
+      pythonPath = fs.existsSync(venvPython) ? venvPython : 'python';
       backendDir = projectRoot;
     }
   }
+
+  // 生产模式下数据目录放在 exe 同级，不会被 electron-builder 清空
+  const dataDir = IS_DEV ? '' : path.join(path.dirname(app.getPath('exe')), 'data');
 
   pythonBridge = new PythonBridge({
     pythonPath,
     backendDir,
     bundled,
     projectRoot,
+    dataDir,
     source: 'wasapi',
     logLevel: IS_DEV ? 'DEBUG' : 'INFO',
   });
@@ -595,6 +739,7 @@ function initPythonBridge() {
 
   pythonBridge.on('status', (data) => {
     console.log(`[Main] python:status → state=${data.state} meeting_id=${data.meeting_id || 'N/A'}`);
+    pythonPipelineState = data.state || 'unknown';
     broadcast('python:status', data);
   });
 

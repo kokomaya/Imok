@@ -5,6 +5,7 @@
  */
 
 import { summaryStore } from '@/stores/summary-store.js';
+import { workspaceStore } from '@/stores/workspace-store.js';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
 import { expressionService } from '@/services/expression-service.js';
 
@@ -53,7 +54,7 @@ export function useIPCListeners({ status, meetingActive, meetingStopping, lastMe
             try {
               const saveData = summaryStore.getSummariesForSave();
               await window.electronAPI.saveMeetingSummaries(mid, saveData);
-              summaryStore.markSaved();
+              workspaceStore.markAllSaved();
             } catch (err) {
               console.error('[App] Auto-save summaries failed:', err);
             }
@@ -81,6 +82,10 @@ export function useIPCListeners({ status, meetingActive, meetingStopping, lastMe
           speaker: data.speaker || '',
           source: data.source || '',
           timestamp: new Date().toLocaleTimeString(),
+          epoch: Date.now(),
+          segmentStart: typeof data.segment_start === 'number' ? data.segment_start : null,
+          segmentEnd: typeof data.segment_end === 'number' ? data.segment_end : null,
+          annotations: [],
         });
         summaryStore.addLiveTranscription({
           text: data.text,

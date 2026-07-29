@@ -232,6 +232,26 @@ class LLMProviderConfig:
     ssl_verify: bool
 
 
+def _load_env_file(env_path: Path) -> dict:
+    """简易 .env 解析器 — 读取 key=value 行，忽略注释和空行。"""
+    result = {}
+    if not env_path.exists():
+        return result
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            eq = stripped.find("=")
+            if eq > 0:
+                key = stripped[:eq].strip()
+                value = stripped[eq + 1:].strip()
+                result[key] = value
+    except Exception:
+        pass
+    return result
+
+
 def load_llm_provider_config() -> LLMProviderConfig:
     """从 llm_providers.yaml + .env 加载 LLM 提供商配置。
 
@@ -243,6 +263,10 @@ def load_llm_provider_config() -> LLMProviderConfig:
     import os
 
     app = get_settings()
+
+    # 读取 .env 文件中的凭证（pydantic-settings 不会将 .env 加载到 os.environ）
+    env_vars = _load_env_file(app.paths.project_root / ".env")
+
     yaml_path = app.paths.providers_file
 
     if not yaml_path.exists():
@@ -268,9 +292,11 @@ def load_llm_provider_config() -> LLMProviderConfig:
             settings=app.llm, extra_headers={}, ssl_verify=True,
         )
 
-    # Resolve API token from env
+    # Resolve API token from env file or environment variable
     token_env = provider.get("api_token_env", "")
-    api_key = os.environ.get(token_env, "") if token_env else ""
+    api_key = ""
+    if token_env:
+        api_key = env_vars.get(token_env, "") or os.environ.get(token_env, "")
 
     llm_settings = LLMSettings(
         api_base_url=provider.get("base_url", app.llm.api_base_url),

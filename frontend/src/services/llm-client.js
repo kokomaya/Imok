@@ -10,6 +10,8 @@
  */
 
 import { subtitleStore } from '@/stores/subtitle-store.js';
+import { notificationStore } from '@/stores/notification-store.js';
+import { formatLLMError } from '@/services/llm-error.js';
 import { TRANSLATION_PROMPT } from '@/prompts/index.js';
 
 // ---------------------------------------------------------------
@@ -98,15 +100,19 @@ async function translateEntry(entry) {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      let bodyText = '';
+      try { bodyText = await response.text(); } catch (_) { /* ignore */ }
+      throw new Error(`HTTP ${response.status}: ${bodyText || response.statusText}`);
     }
 
     await readSSEStream(response, entry.id);
   } catch (err) {
     if (err.name === 'AbortError') {
       console.warn('[llm-client] Translation timed out for entry', entry.id);
+      notificationStore.notifyError('字幕翻译超时，请检查网络或 LLM 服务');
     } else {
       console.error('[llm-client] Translation failed:', err.message);
+      notificationStore.notifyError(formatLLMError(err.message, '字幕翻译失败'));
     }
     subtitleStore.markTranslationError(entry.id);
   } finally {

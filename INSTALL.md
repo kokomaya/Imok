@@ -35,6 +35,31 @@ python --version
 
 ## 二、安装 Python 依赖
 
+### 一键安装（推荐）
+
+在 `resources` 目录中直接运行：
+
+```powershell
+cd "你的安装路径\resources"
+scripts\install-lite-deps.cmd
+```
+
+或用 PowerShell：
+
+```powershell
+cd "你的安装路径\resources"
+powershell -ExecutionPolicy Bypass -File .\scripts\install-lite-deps.ps1
+```
+
+如需安装 CUDA 版 PyTorch（示例：cu121）：
+
+```powershell
+cd "你的安装路径\resources"
+powershell -ExecutionPolicy Bypass -File .\scripts\install-lite-deps.ps1 -Cuda cu121
+```
+
+### 手动安装
+
 打开 PowerShell，进入应用的 `resources` 目录（与 `Imok Meeting Assistant.exe` 同级的 `resources` 文件夹）：
 
 ```powershell

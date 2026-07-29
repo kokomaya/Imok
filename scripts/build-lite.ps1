@@ -158,4 +158,5 @@ Write-Host "`n  Portable app : frontend\out-lite\win-unpacked\" -ForegroundColor
 Write-Host "  Zip package  : frontend\out-lite\ImokMeetingAssistant-0.1.0-lite-win-x64.zip" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Users must install Python environment before running." -ForegroundColor Yellow
+Write-Host "  One-click deps: run resources\scripts\install-lite-deps.cmd" -ForegroundColor Yellow
 Write-Host "  See INSTALL.md for instructions.`n" -ForegroundColor Yellow

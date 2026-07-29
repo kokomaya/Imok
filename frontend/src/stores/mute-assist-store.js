@@ -36,8 +36,15 @@ const state = reactive({
   /** 当前输出文本（streaming 中） */
   outputText: '',
 
+  /** 解析后的多候选输出（finishExpression 时生成） */
+  /** @type {string[]} */
+  candidates: [],
+
   /** 当前请求状态 */
   outputStatus: 'idle', // 'idle' | 'streaming' | 'done' | 'error'
+
+  /** 最近一次错误的可读信息（outputStatus === 'error' 时展示） */
+  errorMessage: '',
 
   /** 历史记录 */
   /** @type {ExpressionEntry[]} */
@@ -60,7 +67,9 @@ function startExpression(input) {
   state.activeId = id;
   state.inputText = input;
   state.outputText = '';
+  state.candidates = [];
   state.outputStatus = 'streaming';
+  state.errorMessage = '';
   state.copied = false;
   return id;
 }
@@ -83,12 +92,24 @@ function finishExpression(id) {
   if (state.activeId !== id) return;
   state.outputStatus = 'done';
 
+  // 解析多候选：检测编号列表（1. xxx\n2. xxx），否则视为单条
+  const raw = state.outputText.trim();
+  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  const numbered = lines.filter((l) => /^\d+\.\s/.test(l));
+
+  if (numbered.length >= 2) {
+    state.candidates = numbered.map((l) => l.replace(/^\d+\.\s*/, ''));
+  } else {
+    state.candidates = raw ? [raw] : [];
+  }
+
   // 保存到历史
-  if (state.inputText.trim() && state.outputText.trim()) {
+  if (state.inputText.trim() && raw) {
     state.history.push({
       id,
       input: state.inputText,
-      output: state.outputText,
+      output: raw,
+      candidates: [...state.candidates],
       status: 'done',
       timestamp: Date.now(),
     });
@@ -101,10 +122,12 @@ function finishExpression(id) {
 /**
  * 标记错误。
  * @param {number} id
+ * @param {string} [message] 面向用户的可读错误信息
  */
-function markError(id) {
+function markError(id, message = '') {
   if (state.activeId !== id) return;
   state.outputStatus = 'error';
+  state.errorMessage = message;
 }
 
 /**
@@ -154,7 +177,9 @@ function markCopied() {
 function resetOutput() {
   state.activeId = null;
   state.outputText = '';
+  state.candidates = [];
   state.outputStatus = 'idle';
+  state.errorMessage = '';
   state.copied = false;
 }
 

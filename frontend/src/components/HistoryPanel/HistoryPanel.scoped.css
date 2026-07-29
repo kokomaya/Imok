@@ -1,0 +1,144 @@
+/* ── 历史面板 ── */
+
+.history-panel {
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafafa;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid #eee;
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  z-index: 1;
+}
+
+.history-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.history-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #999;
+  padding: 2px 6px;
+}
+
+.history-close:hover {
+  color: #333;
+}
+
+.history-loading,
+.history-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+}
+
+.history-list {
+  padding: 2px 0;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background 0.15s;
+}
+
+.history-item:hover {
+  background: #e8eaf6;
+}
+
+.history-item.active {
+  background: #e3f2fd;
+  border-left: 3px solid #1565c0;
+}
+
+.history-item-main {
+  flex: 1;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.history-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.history-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #222;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.history-date {
+  font-size: 11px;
+  font-weight: 400;
+  color: #888;
+}
+
+.history-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #e0e0e0;
+  color: #666;
+}
+
+.history-status.running {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.history-status.finished {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.history-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meta-tag {
+  font-size: 10px;
+  color: #888;
+}
+
+.summary-tag {
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.history-delete {
+  border: none;
+  background: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 6px;
+  opacity: 0.3;
+  transition: opacity 0.15s;
+}
+
+.history-delete:hover {
+  opacity: 1;
+}

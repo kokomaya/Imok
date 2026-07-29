@@ -106,6 +106,43 @@ function setPaused(paused) {
   state.paused = paused;
 }
 
+// ── 编辑 API（回看模式下手动修正字幕）──
+
+/**
+ * 编辑字幕原文。
+ * @param {number} id
+ * @param {string} newText
+ */
+function editOriginal(id, newText) {
+  const entry = state.entries.find(e => e.id === id);
+  if (!entry || entry.original === newText) return;
+  entry.original = newText;
+}
+
+/**
+ * 编辑字幕翻译。
+ * @param {number} id
+ * @param {string} newText
+ */
+function editTranslation(id, newText) {
+  const entry = state.entries.find(e => e.id === id);
+  if (!entry || entry.translation === newText) return;
+  entry.translation = newText;
+  entry.translationStatus = 'done';
+}
+
+/**
+ * 获取可序列化的转写数据（用于持久化）。
+ * @returns {Object[]}
+ */
+function getTranscriptionsForSave() {
+  return state.entries.map(e => ({
+    text: e.original,
+    timestamp: e.timestamp,
+    language: e.language,
+  }));
+}
+
 /** 最近的可见字幕（最新 N 条） */
 const visibleEntries = computed(() => {
   return state.entries.slice(-VISIBLE_COUNT);
@@ -120,4 +157,7 @@ export const subtitleStore = {
   setPythonStatus,
   clearAll,
   setPaused,
+  editOriginal,
+  editTranslation,
+  getTranscriptionsForSave,
 };
