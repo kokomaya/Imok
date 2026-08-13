@@ -313,8 +313,10 @@ async def _run_subprocess(source_type: str) -> None:
     recording_enabled = False
     recording_mode = "silence"  # 'silence' | 'skip'
     # 自动摘要设置（跨会议保持，会议启动时应用到新协调器）
-    summary_auto_enabled = True
+    summary_auto_enabled = False  # 默认手动摘要；由前端下发开启定时
     summary_interval_s: float | None = None
+    # 自定义总结模板（跨会议保持）：{segment_system, merge_system, section_titles}
+    summary_template: dict | None = None
     # 持有事件循环引用，供从 reader 线程安全调度协程
     main_loop = asyncio.get_running_loop()
 
@@ -556,6 +558,13 @@ async def _run_subprocess(source_type: str) -> None:
                 if summary_interval_s is not None:
                     summary_coordinator.set_summary_interval(summary_interval_s)
                 summary_coordinator.set_auto_summary(summary_auto_enabled)
+                # 应用跨会议保持的自定义总结模板
+                if summary_template is not None:
+                    summary_coordinator.set_summary_template(
+                        summary_template.get("segment_system", ""),
+                        summary_template.get("merge_system", ""),
+                        summary_template.get("section_titles"),
+                    )
                 pl.on_transcription(summary_coordinator.feed_transcription)
                 await summary_coordinator.start()
                 logger.info("Summary coordinator initialized.")
@@ -690,6 +699,20 @@ async def _run_subprocess(source_type: str) -> None:
             if summary_coordinator is not None:
                 summary_coordinator.set_auto_summary(summary_auto_enabled)
             logger.info("Auto summary set to %s", summary_auto_enabled)
+        elif action == ControlAction.SET_SUMMARY_TEMPLATE:
+            nonlocal summary_template
+            summary_template = {
+                "segment_system": str(message.data.get("segment_system", "") or ""),
+                "merge_system": str(message.data.get("merge_system", "") or ""),
+                "section_titles": message.data.get("section_titles") or {},
+            }
+            if summary_coordinator is not None:
+                summary_coordinator.set_summary_template(
+                    summary_template["segment_system"],
+                    summary_template["merge_system"],
+                    summary_template["section_titles"],
+                )
+            logger.info("Summary template updated via control")
         elif action == ControlAction.SET_DEVICES:
             nonlocal selected_loopback_device, selected_mic_device
             lb = message.data.get("loopback_device")

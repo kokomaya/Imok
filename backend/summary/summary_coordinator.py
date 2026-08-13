@@ -77,6 +77,9 @@ class SummaryCoordinator:
         self._segment_callbacks: List[SegmentSummaryCallback] = []
         self._global_callbacks: List[GlobalSummaryCallback] = []
 
+        # 自定义模板重命名后的 Action Items 标题（供全局解析感知）
+        self._action_keywords: List[str] = []
+
         # Wire time window manager callback
         self._time_window.on_window_complete(self._on_window_complete)
 
@@ -108,7 +111,9 @@ class SummaryCoordinator:
         # 强制合并剩余的段落摘要
         summary = await self._merger.force_merge()
         if summary and not summary.is_empty:
-            items = self._extractor.extract_from_text(summary.raw_text)
+            items = self._extractor.extract_from_text(
+                summary.raw_text, extra_keywords=self._action_keywords,
+            )
             self._notify_global(summary, items)
 
         # 停止 worker
@@ -176,7 +181,9 @@ class SummaryCoordinator:
         # 2. 全局合并（GlobalMerger 内部控制合并频率）
         global_result = await self._merger.add_segment(segment)
         if global_result and not global_result.is_empty:
-            items = self._extractor.extract_from_text(global_result.raw_text)
+            items = self._extractor.extract_from_text(
+                global_result.raw_text, extra_keywords=self._action_keywords,
+            )
             self._notify_global(global_result, items)
 
     def _notify_segment(self, segment: SegmentSummary) -> None:
@@ -212,6 +219,24 @@ class SummaryCoordinator:
         """开关自动定时摘要。关闭后仅在手动触发时生成摘要。"""
         self._time_window.set_auto_emit(enabled)
 
+    def set_summary_template(
+        self,
+        segment_system: str,
+        merge_system: str,
+        section_titles: Optional[dict] = None,
+    ) -> None:
+        """应用自定义会议总结模板。
+
+        segment_system / merge_system 为自定义 system prompt，空字符串表示保持
+        系统默认。section_titles 用于让结构化解析感知用户重命名后的章节标题。
+        """
+        self._pm.set_summary_system(segment_system, merge_system)
+        titles = section_titles or {}
+        self._summarizer.set_section_titles(titles)
+        action_title = str(titles.get("actions", "") or "").strip()
+        self._action_keywords = [action_title] if action_title else []
+        logger.info("Summary template applied (custom=%s)", bool(segment_system or merge_system))
+
     async def trigger_segment_summary(self) -> None:
         """手动触发段落摘要 — 刷出当前时间窗口，立即生成段落摘要。"""
         self._time_window.flush()
@@ -231,7 +256,9 @@ class SummaryCoordinator:
         # 强制合并所有段落摘要为全局摘要
         summary = await self._merger.force_merge()
         if summary and not summary.is_empty:
-            items = self._extractor.extract_from_text(summary.raw_text)
+            items = self._extractor.extract_from_text(
+                summary.raw_text, extra_keywords=self._action_keywords,
+            )
             self._notify_global(summary, items)
 
     @property

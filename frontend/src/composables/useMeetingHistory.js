@@ -73,7 +73,12 @@ export function useMeetingHistory({ transcriptions, historyVisible, historyPanel
       summaryStore.clearAll();
 
       summaryStore.setReviewData(
-        (trans || []).map((t) => ({ text: t.text, timestamp: t.timestamp || 0 })),
+        (trans || []).map((t) => ({
+          text: t.text,
+          timestamp: t.timestamp || 0,
+          start: typeof t.segment_start === 'number' ? t.segment_start : null,
+          end: typeof t.segment_end === 'number' ? t.segment_end : null,
+        })),
         meetingId,
       );
 

@@ -145,6 +145,10 @@ function buildAppMenu() {
           accelerator: 'CmdOrCtrl+Shift+P',
           click: () => send('toggle-summary'),
         },
+        {
+          label: '⚙ 会议总结设置（模板 / 语言模型）',
+          click: () => send('toggle-summary-settings'),
+        },
         { type: 'separator' },
         {
           label: '清空转写记录',

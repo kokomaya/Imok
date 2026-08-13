@@ -15,14 +15,173 @@ import {
   generateReviewGlobalSummary,
   generateLiveSegmentSummary,
   generateLiveGlobalSummary,
+  generateTimeRangeSummary,
 } from './useSummaryLLM.js';
 import InlineEdit from '@/components/common/InlineEdit.vue';
 import EditableField from '@/components/common/EditableField.vue';
+import SummaryPreviewDialog from './SummaryPreviewDialog.vue';
+import {
+  buildFullSummaryMarkdown,
+  buildSegmentMarkdown,
+  copyToClipboard,
+} from './summaryExport.js';
+import { notificationStore } from '@/stores/notification-store.js';
 
 const triggeringSegment = ref(false);
 const triggeringGlobal = ref(false);
 const summaryInterval = ref(600);
-const autoSummary = ref(true);
+// 默认手动摘要：定时摘要需用户主动开启
+const autoSummary = ref(false);
+
+// ── 预览 / 复制 ──
+const previewVisible = ref(false);
+const previewMarkdown = ref('');
+const copiedKey = ref('');
+let copiedTimer = null;
+
+function openPreview() {
+  previewMarkdown.value = buildFullSummaryMarkdown();
+  previewVisible.value = true;
+}
+
+async function copyMarkdown(text, key) {
+  if (!text || !text.trim()) return;
+  const ok = await copyToClipboard(text);
+  if (ok) {
+    copiedKey.value = key;
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => { copiedKey.value = ''; }, 1600);
+  } else {
+    notificationStore.notifyError('复制失败，请手动选择文本复制');
+  }
+}
+
+function copyGlobal() {
+  copyMarkdown(summaryStore.state.globalSummary?.rawText || '', 'global');
+}
+
+function copyAllSegments() {
+  const text = summaryStore.state.segments
+    .map(buildSegmentMarkdown)
+    .filter((s) => s.trim())
+    .join('\n\n---\n\n');
+  copyMarkdown(text, 'segments');
+}
+
+// ── 时段摘要（按时间条选取区间，独立于段落/全局摘要）──
+const triggeringRange = ref(false);
+const rangeStartRaw = ref(0);
+const rangeEndRaw = ref(0);
+const rangeTouched = ref(false);
+
+/** 当前模式下转写的会议相对时长（秒，向上取整）。 */
+const meetingDuration = computed(() =>
+  Math.max(0, Math.ceil(summaryStore.normalizedTranscripts().duration)),
+);
+
+const hasTranscripts = computed(() => meetingDuration.value > 0);
+
+// 时长变化时：未手动调整则跟随整场；已手动则夹取到合法范围
+watch(meetingDuration, (d) => {
+  if (!rangeTouched.value) {
+    rangeStartRaw.value = 0;
+    rangeEndRaw.value = d;
+  } else {
+    rangeStartRaw.value = Math.min(rangeStartRaw.value, d);
+    rangeEndRaw.value = Math.min(rangeEndRaw.value, d);
+  }
+}, { immediate: true });
+
+const rangeStart = computed(() => Math.min(rangeStartRaw.value, rangeEndRaw.value));
+const rangeEnd = computed(() => Math.max(rangeStartRaw.value, rangeEndRaw.value));
+
+function formatSec(s) {
+  const total = Math.max(0, Math.round(s));
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+const rangeLabel = computed(() => `${formatSec(rangeStart.value)} - ${formatSec(rangeEnd.value)}`);
+
+function onRangeStartInput(e) {
+  rangeTouched.value = true;
+  activePreset.value = 'custom';
+  draggingHandle.value = 'start';
+  rangeStartRaw.value = Math.min(Number(e.target.value), rangeEndRaw.value);
+}
+function onRangeEndInput(e) {
+  rangeTouched.value = true;
+  activePreset.value = 'custom';
+  draggingHandle.value = 'end';
+  rangeEndRaw.value = Math.max(Number(e.target.value), rangeStartRaw.value);
+}
+// 松开滑块后收起预览气泡
+function endRangeDrag() {
+  draggingHandle.value = null;
+}
+
+// 仅在拖动时激活：当前拖动端所在秒位置的字幕预览
+const draggingHandle = ref(null); // 'start' | 'end' | null
+const rangePreviewSec = computed(() =>
+  draggingHandle.value === 'end' ? rangeEnd.value : rangeStart.value,
+);
+const rangePreviewText = computed(() =>
+  draggingHandle.value ? summaryStore.transcriptAtSec(rangePreviewSec.value) : '',
+);
+const rangePreviewTime = computed(() =>
+  draggingHandle.value ? formatSec(rangePreviewSec.value) : '',
+);
+const rangePreviewPercent = computed(() => {
+  if (!draggingHandle.value || !meetingDuration.value) return 0;
+  return Math.min(100, Math.max(0, (rangePreviewSec.value / meetingDuration.value) * 100));
+});
+
+const RANGE_PRESETS = [
+  { key: 'all', label: '全局', seconds: 0 },
+  { key: 'r2', label: '最近2分钟', seconds: 120 },
+  { key: 'r5', label: '最近5分钟', seconds: 300 },
+  { key: 'r10', label: '最近10分钟', seconds: 600 },
+];
+const activePreset = ref('all');
+
+function applyPreset(preset) {
+  rangeTouched.value = true;
+  activePreset.value = preset.key;
+  const d = meetingDuration.value;
+  if (preset.key === 'all') {
+    rangeStartRaw.value = 0;
+    rangeEndRaw.value = d;
+  } else {
+    rangeStartRaw.value = Math.max(0, d - preset.seconds);
+    rangeEndRaw.value = d;
+  }
+}
+
+async function generateRange() {
+  if (triggeringRange.value || !hasTranscripts.value) return;
+  const isFull = rangeStart.value <= 0 && rangeEnd.value >= meetingDuration.value;
+  const label = isFull ? `全局（${rangeLabel.value}）` : rangeLabel.value;
+  triggeringRange.value = true;
+  try {
+    await generateTimeRangeSummary({
+      startSec: rangeStart.value,
+      endSec: rangeEnd.value,
+      label,
+      timeRange: rangeLabel.value,
+    });
+  } finally {
+    triggeringRange.value = false;
+  }
+}
+
+function copyRangeSummary(item) {
+  copyMarkdown(item.rawText, `range-${item.id}`);
+}
+function removeRangeSummary(id) {
+  summaryStore.removeTimeRangeSummary(id);
+}
+
 
 const INTERVAL_OPTIONS = [
   { label: '20分钟', value: 1200 },
@@ -251,6 +410,12 @@ function onEditActionItem(index, field, value) {
     <div class="panel-header">
       <div class="header-left">
         <span class="panel-title">📋 会议摘要</span>
+        <button
+          class="preview-btn"
+          @click="openPreview"
+          :disabled="!hasContent && !globalRawText"
+          title="弹出预览完整摘要（可一键复制）"
+        >🔍 预览</button>
       </div>
       <div class="header-right">
         <button
@@ -289,6 +454,13 @@ function onEditActionItem(index, field, value) {
             @click="activeTab = 'global'"
           >
             📊 全局总结
+          </button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'timerange' }"
+            @click="activeTab = 'timerange'"
+          >
+            🕘 时段摘要
           </button>
           <button
             class="tab-btn"
@@ -343,7 +515,15 @@ function onEditActionItem(index, field, value) {
       </div>
       <!-- 关键结论 -->
       <div v-if="allConclusions.length" class="section">
-        <div class="section-label">关键结论</div>
+        <div class="section-label">
+          关键结论
+          <button
+            class="copy-btn"
+            :class="{ done: copiedKey === 'segments' }"
+            @click="copyAllSegments"
+            title="复制全部段落摘要"
+          >{{ copiedKey === 'segments' ? '✓ 已复制' : '📋 复制' }}</button>
+        </div>
         <ul class="conclusion-list">
           <li v-for="(item, i) in allConclusions.slice(0, 10)" :key="i" class="conclusion-item">
             <span class="conclusion-time">{{ item.timeRange }}</span>
@@ -394,6 +574,12 @@ function onEditActionItem(index, field, value) {
           <span v-if="globalStats" class="section-meta">
             · {{ globalStats.segmentsMerged }} 段 · {{ globalStats.lastUpdated }}
           </span>
+          <button
+            class="copy-btn"
+            :class="{ done: copiedKey === 'global' }"
+            @click="copyGlobal"
+            title="复制全局总结"
+          >{{ copiedKey === 'global' ? '✓ 已复制' : '📋 复制' }}</button>
         </div>
         <InlineEdit
           v-if="editable"
@@ -409,6 +595,119 @@ function onEditActionItem(index, field, value) {
       <div v-if="!globalRawText && !triggeringGlobal" class="empty-state">
         <div class="empty-icon">📊</div>
         <div class="empty-text">点击上方按钮生成全局会议总结</div>
+      </div>
+    </div>
+
+    <!-- 时段摘要视图 -->
+    <div v-if="activeTab === 'timerange'" class="tab-content">
+      <div class="range-controls">
+        <div class="range-presets">
+          <button
+            v-for="p in RANGE_PRESETS"
+            :key="p.key"
+            class="range-preset-btn"
+            :class="{ active: activePreset === p.key }"
+            :disabled="!hasTranscripts"
+            @click="applyPreset(p)"
+          >{{ p.label }}</button>
+        </div>
+
+        <div class="range-slider" :class="{ disabled: !hasTranscripts }">
+          <div class="range-track">
+            <div
+              class="range-fill"
+              :style="{
+                left: meetingDuration ? (rangeStart / meetingDuration * 100) + '%' : '0%',
+                right: meetingDuration ? (100 - rangeEnd / meetingDuration * 100) + '%' : '0%',
+              }"
+            ></div>
+            <div
+              v-if="draggingHandle"
+              class="range-preview-popup"
+              :style="{ left: rangePreviewPercent + '%' }"
+            >
+              <div class="range-preview-time">{{ rangePreviewTime }}</div>
+              <div class="range-preview-text">{{ rangePreviewText || '（此处暂无字幕）' }}</div>
+            </div>
+            <input
+              class="range-input range-input-start"
+              type="range"
+              min="0"
+              :max="meetingDuration || 1"
+              step="1"
+              :value="rangeStart"
+              :disabled="!hasTranscripts"
+              @input="onRangeStartInput"
+              @change="endRangeDrag"
+              @pointerup="endRangeDrag"
+              @blur="endRangeDrag"
+            />
+            <input
+              class="range-input range-input-end"
+              type="range"
+              min="0"
+              :max="meetingDuration || 1"
+              step="1"
+              :value="rangeEnd"
+              :disabled="!hasTranscripts"
+              @input="onRangeEndInput"
+              @change="endRangeDrag"
+              @pointerup="endRangeDrag"
+              @blur="endRangeDrag"
+            />
+          </div>
+          <div class="range-scale">
+            <span>00:00</span>
+            <span class="range-selected">{{ rangeLabel }}</span>
+            <span>{{ formatSec(meetingDuration) }}</span>
+          </div>
+        </div>
+
+        <div class="trigger-row">
+          <button
+            class="trigger-btn primary"
+            :disabled="triggeringRange || !hasTranscripts"
+            @click="generateRange"
+          >
+            {{ triggeringRange ? '⏳ 生成中…' : '▶ 生成时段摘要' }}
+          </button>
+        </div>
+        <div v-if="!hasTranscripts" class="range-hint">
+          暂无转写内容，开始会议或载入历史会议后即可按时间段生成摘要。
+        </div>
+      </div>
+
+      <!-- 流式生成中 -->
+      <div v-if="triggeringRange && summaryStore.state.generatingText" class="section generating-section">
+        <div class="section-label">生成中…</div>
+        <div class="generating-text">{{ summaryStore.state.generatingText }}<span class="cursor-blink">▍</span></div>
+      </div>
+
+      <!-- 结果列表 -->
+      <div v-if="summaryStore.state.timeRangeSummaries.length" class="range-results">
+        <div
+          v-for="item in summaryStore.state.timeRangeSummaries"
+          :key="item.id"
+          class="range-result-card"
+        >
+          <div class="range-result-head">
+            <span class="range-result-label">🕘 {{ item.label }}</span>
+            <div class="range-result-actions">
+              <button
+                class="copy-btn"
+                :class="{ done: copiedKey === `range-${item.id}` }"
+                @click="copyRangeSummary(item)"
+                title="复制此时段摘要"
+              >{{ copiedKey === `range-${item.id}` ? '✓ 已复制' : '📋 复制' }}</button>
+              <button class="range-del-btn" @click="removeRangeSummary(item.id)" title="删除此条">🗑</button>
+            </div>
+          </div>
+          <div class="range-result-text">{{ item.rawText }}</div>
+        </div>
+      </div>
+      <div v-else-if="!triggeringRange" class="empty-state">
+        <div class="empty-icon">🕘</div>
+        <div class="empty-text">拖动时间条或选择预设，生成某一时间段的独立摘要</div>
       </div>
     </div>
 
@@ -545,6 +844,12 @@ function onEditActionItem(index, field, value) {
       </div>
     </div>
   </div>
+
+  <SummaryPreviewDialog
+    :visible="previewVisible"
+    :markdown="previewMarkdown"
+    @close="previewVisible = false"
+  />
 </template>
 
 <style scoped src="./SummaryPanel.scoped.css"></style>

@@ -95,6 +95,8 @@ export function useIPCListeners({ status, meetingActive, meetingStopping, lastMe
         summaryStore.addLiveTranscription({
           text: data.text,
           timestamp: Date.now() / 1000,
+          start: typeof data.segment_start === 'number' ? data.segment_start : null,
+          end: typeof data.segment_end === 'number' ? data.segment_end : null,
         });
       }),
     );

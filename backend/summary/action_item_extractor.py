@@ -98,6 +98,7 @@ class ActionItemExtractor:
         text: str,
         *,
         source: str = "",
+        extra_keywords: Optional[List[str]] = None,
     ) -> List[ActionItem]:
         """从完整摘要文本中提取 Action Items。
 
@@ -106,6 +107,7 @@ class ActionItemExtractor:
         Args:
             text: LLM 生成的摘要文本。
             source: 来源标识（如时间范围）。
+            extra_keywords: 额外的章节标题关键词（自定义模板重命名后的标题）。
 
         Returns:
             结构化 Action Items 列表。
@@ -113,7 +115,7 @@ class ActionItemExtractor:
         if not text or not text.strip():
             return []
 
-        raw_items = _extract_action_lines(text)
+        raw_items = _extract_action_lines(text, extra_keywords=extra_keywords)
         return [self._parse_item(line, source=source) for line in raw_items]
 
     def extract_from_lines(
@@ -171,9 +173,17 @@ class ActionItemExtractor:
 # =========================================================================
 
 
-def _extract_action_lines(text: str) -> List[str]:
+def _extract_action_lines(
+    text: str,
+    *,
+    extra_keywords: Optional[List[str]] = None,
+) -> List[str]:
     """从摘要文本中提取 Action Items 段落下的列表项。"""
-    keywords = ("action", "行动", "待办", "todo")
+    keywords = ["action", "行动", "待办", "todo"]
+    for kw in extra_keywords or []:
+        kw = str(kw).strip().lower()
+        if kw and kw not in keywords:
+            keywords.append(kw)
     lines = text.split("\n")
     items: List[str] = []
     capturing = False

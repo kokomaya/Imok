@@ -45,6 +45,10 @@ const INVOKE_CHANNELS = [
   'expression-settings:save',
   'asr-settings:get',
   'asr-settings:save',
+  'summary-templates:get',
+  'summary-templates:save',
+  'llm:list-providers',
+  'llm:set-provider',
   'app:info',
   'app:help-doc',
   'shell:open-external',
@@ -279,6 +283,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   saveAsrSettings: (settings) => {
     return ipcRenderer.invoke('asr-settings:save', settings);
+  },
+
+  // ── 会议总结模板 ──
+
+  getSummaryTemplates: () => {
+    return ipcRenderer.invoke('summary-templates:get');
+  },
+
+  saveSummaryTemplates: (settings) => {
+    return ipcRenderer.invoke('summary-templates:save', settings);
+  },
+
+  // ── LLM 提供商切换 ──
+
+  listLLMProviders: () => {
+    return ipcRenderer.invoke('llm:list-providers');
+  },
+
+  setLLMProvider: (providerName) => {
+    return ipcRenderer.invoke('llm:set-provider', providerName);
   },
 
   // ── 帮助 ──

@@ -1,0 +1,240 @@
+/* 会议总结设置面板 — 居中模态对话框 */
+
+.ssp-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 24, 33, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.ssp {
+  display: flex;
+  flex-direction: column;
+  width: min(860px, 94vw);
+  max-height: 86vh;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+.ssp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid #eceff1;
+  background: linear-gradient(180deg, #fafbfc 0%, #f4f6f8 100%);
+}
+
+.ssp-title { font-size: 14px; font-weight: 600; color: #263238; }
+
+.ssp-close {
+  border: none; background: none; font-size: 16px; cursor: pointer;
+  color: #90a4ae; width: 28px; height: 28px; border-radius: 6px;
+}
+.ssp-close:hover { background: #eceff1; color: #37474f; }
+
+/* ── Tabs ── */
+.ssp-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 0;
+  border-bottom: 1px solid #eceff1;
+}
+.ssp-tab {
+  border: none;
+  background: none;
+  font-size: 13px;
+  color: #78909c;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.ssp-tab:hover { color: #37474f; }
+.ssp-tab.active { color: #1565c0; border-bottom-color: #1976d2; font-weight: 600; }
+
+.ssp-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
+
+/* ── 模板：左右布局 ── */
+.ssp-template { display: flex; gap: 16px; align-items: stretch; }
+
+.ssp-list {
+  width: 190px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ssp-list-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid #e4e8eb;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ssp-list-item:hover { border-color: #b3d4fc; background: #f6faff; }
+.ssp-list-item.active { border-color: #1976d2; background: #e8f2fe; }
+.ssp-list-name { font-size: 13px; color: #263238; font-weight: 500; }
+.ssp-list-hint { font-size: 10px; color: #90a4ae; }
+.ssp-add {
+  margin-top: 2px;
+  padding: 7px 10px;
+  border: 1px dashed #b0bec5;
+  border-radius: 8px;
+  background: #fff;
+  color: #607d8b;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ssp-add:hover { border-color: #1976d2; color: #1565c0; background: #f6faff; }
+
+.ssp-editor {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #eceff1;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fcfdfe;
+}
+
+/* 系统默认提示 */
+.ssp-sys-note { text-align: center; padding: 32px 16px; color: #607d8b; }
+.ssp-sys-icon { font-size: 34px; }
+.ssp-sys-title { font-size: 14px; font-weight: 600; color: #37474f; margin: 8px 0 6px; }
+.ssp-sys-desc { font-size: 12px; line-height: 1.7; color: #78909c; }
+
+.ssp-row { display: flex; align-items: center; gap: 10px; }
+.ssp-row-name { margin-bottom: 12px; }
+.ssp-editor-actions { display: flex; gap: 6px; margin-left: auto; }
+
+.ssp-input {
+  border: 1px solid #cfd8dc;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: #263238;
+  outline: none;
+  transition: border-color 0.15s;
+  flex: 1;
+  min-width: 0;
+}
+.ssp-input:focus { border-color: #1976d2; }
+.ssp-input:disabled { background: #f5f7f8; color: #b0bec5; }
+
+.ssp-btn {
+  border: 1px solid #cfd8dc;
+  background: #fff;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 5px 10px;
+  color: #546e7a;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.ssp-btn:hover { border-color: #1976d2; color: #1565c0; }
+.ssp-btn.danger:hover { border-color: #e53935; color: #c62828; background: #fff5f5; }
+
+.ssp-mode { display: flex; gap: 18px; margin-bottom: 12px; }
+.ssp-radio, .ssp-switch { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #455a64; cursor: pointer; }
+
+.ssp-section-hint { font-size: 11px; color: #90a4ae; margin-bottom: 8px; }
+.ssp-section-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.ssp-section-title { flex: 1; }
+
+.ssp-field { margin-top: 12px; }
+.ssp-label { display: block; font-size: 12px; color: #607d8b; margin-bottom: 4px; }
+.ssp-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cfd8dc;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: #263238;
+  outline: none;
+  resize: vertical;
+  line-height: 1.6;
+  font-family: inherit;
+}
+.ssp-textarea:focus { border-color: #1976d2; }
+.ssp-textarea.mono { font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; }
+
+.ssp-warn {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #8d6e00;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.ssp-warn code, .ssp-model-note code {
+  background: #eef1f3;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: #c2185b;
+}
+
+/* ── 语言模型 ── */
+.ssp-model-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.ssp-model-title { font-size: 13px; font-weight: 600; color: #37474f; }
+
+.ssp-providers { display: flex; flex-direction: column; gap: 8px; }
+.ssp-provider {
+  text-align: left;
+  border: 1px solid #e4e8eb;
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ssp-provider:hover { border-color: #b3d4fc; background: #f6faff; }
+.ssp-provider.active { border-color: #1976d2; background: #e8f2fe; }
+.ssp-provider-top { display: flex; align-items: center; gap: 8px; }
+.ssp-provider-name { font-size: 13px; font-weight: 600; color: #263238; }
+.ssp-provider-meta { display: flex; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+.ssp-provider-model { font-size: 12px; color: #455a64; }
+.ssp-provider-url { font-size: 11px; color: #90a4ae; }
+
+.ssp-badge {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: #eceff1;
+  color: #607d8b;
+}
+.ssp-badge.local { background: #e8f5e9; color: #2e7d32; }
+.ssp-badge.cloud { background: #e3f2fd; color: #1565c0; }
+.ssp-badge.active { background: #1976d2; color: #fff; margin-left: auto; }
+
+.ssp-empty { font-size: 12px; color: #90a4ae; padding: 20px; text-align: center; }
+
+.ssp-model-note {
+  margin-top: 14px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: #607d8b;
+  background: #f7f9fa;
+  border: 1px solid #eceff1;
+  border-radius: 8px;
+  padding: 10px 12px;
+}

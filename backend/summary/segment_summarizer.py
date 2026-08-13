@@ -62,6 +62,8 @@ class SegmentSummarizer:
         self._glossary = glossary
         self._temperature = temperature
         self._max_tokens = max_tokens
+        # 自定义模板的章节标题（key → 标题），用于让解析感知重命名后的章节
+        self._section_titles: dict[str, str] = {}
 
     @property
     def glossary(self) -> str:
@@ -70,6 +72,23 @@ class SegmentSummarizer:
     @glossary.setter
     def glossary(self, value: str) -> None:
         self._glossary = value
+
+    def set_section_titles(self, titles: Optional[dict]) -> None:
+        """设置自定义章节标题，使结构化解析能识别用户重命名的章节。
+
+        titles 形如 {"topics": "议题", "conclusions": "结论", ...}。
+        默认标题与内置关键词一致时无副作用；空/None 表示恢复默认。
+        """
+        self._section_titles = {
+            str(k): str(v).strip()
+            for k, v in (titles or {}).items()
+            if v and str(v).strip()
+        }
+
+    def _extra_kw(self, key: str) -> List[str]:
+        """返回某章节的额外匹配关键词（自定义标题）。"""
+        title = self._section_titles.get(key, "")
+        return [title] if title else []
 
     async def summarize(
         self,
@@ -119,9 +138,15 @@ class SegmentSummarizer:
             time_range=time_range,
             raw_text=raw,
             source_text=text,
-            topics=_extract_section(raw, "主题", "topic"),
-            conclusions=_extract_section(raw, "结论", "conclusion", "决策", "decision"),
-            action_items=_extract_section(raw, "action", "行动", "待办", "todo"),
+            topics=_extract_section(raw, "主题", "topic", *self._extra_kw("topics")),
+            conclusions=_extract_section(
+                raw, "结论", "conclusion", "决策", "decision",
+                *self._extra_kw("conclusions"),
+            ),
+            action_items=_extract_section(
+                raw, "action", "行动", "待办", "todo",
+                *self._extra_kw("actions"),
+            ),
         )
 
 

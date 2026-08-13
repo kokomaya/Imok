@@ -666,6 +666,59 @@ function setupIPC() {
     }
   });
 
+  // ── 会议总结模板（多套自定义模板，全局持久化）─────────────
+
+  const summaryTemplatesPath = path.join(BACKEND_ROOT, 'config', 'summary_templates.json');
+
+  ipcMain.handle('summary-templates:get', () => {
+    try {
+      if (!fs.existsSync(summaryTemplatesPath)) return { ok: true, settings: {} };
+      const data = JSON.parse(fs.readFileSync(summaryTemplatesPath, 'utf-8'));
+      return { ok: true, settings: data };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('summary-templates:save', (_event, settings) => {
+    try {
+      if (!settings || typeof settings !== 'object') return { ok: false, error: 'Invalid settings' };
+      const tmpPath = summaryTemplatesPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(settings, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, summaryTemplatesPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // ── LLM 提供商切换（云端 / 本地 Ollama 等）──────────────
+
+  const llmActivePath = path.join(BACKEND_ROOT, 'config', 'llm_active.json');
+
+  ipcMain.handle('llm:list-providers', () => {
+    try {
+      const { listLLMProviders } = require('./llm-config');
+      return listLLMProviders(BACKEND_ROOT);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('llm:set-provider', (_event, providerName) => {
+    try {
+      if (typeof providerName !== 'string' || !providerName.trim()) {
+        return { ok: false, error: 'Invalid provider name' };
+      }
+      const tmpPath = llmActivePath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify({ provider: providerName }, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, llmActivePath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // ── 帮助相关 ─────────────────────────────────────────────
 
   const { getAppInfo } = require('./app-info');

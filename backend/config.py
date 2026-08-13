@@ -259,11 +259,14 @@ def _load_env_file(env_path: Path) -> dict:
 def load_llm_provider_config() -> LLMProviderConfig:
     """从 llm_providers.yaml + .env 加载 LLM 提供商配置。
 
+    Provider 选择优先级：config/llm_active.json 的 provider 覆盖 > yaml default_provider。
+
     Returns:
         LLMProviderConfig 包含 LLMSettings、额外请求头和 SSL 验证标志。
 
     Falls back to default LLMSettings if YAML file not found.
     """
+    import json
     import os
 
     app = get_settings()
@@ -289,7 +292,21 @@ def load_llm_provider_config() -> LLMProviderConfig:
 
     providers = cfg.get("providers", {})
     default_name = cfg.get("default_provider", "")
-    provider = providers.get(default_name, {})
+
+    # 读取运行时选择的 provider 覆盖（由前端 UI 写入）
+    active_name = ""
+    active_path = app.paths.config_dir / "llm_active.json"
+    if active_path.exists():
+        try:
+            active_data = json.loads(active_path.read_text(encoding="utf-8"))
+            candidate = str(active_data.get("provider", "") or "")
+            if candidate and candidate in providers:
+                active_name = candidate
+        except Exception:
+            active_name = ""
+
+    chosen_name = active_name or default_name
+    provider = providers.get(chosen_name, {})
 
     if not provider:
         return LLMProviderConfig(

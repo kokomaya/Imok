@@ -71,8 +71,11 @@ const state = reactive({
   /** 当前实时会议 ID（由 App.vue 根据 python:status 设置） */
   liveMeetingId: '',
 
-  /** 实时模式下的转写文本列表（由 App.vue 喂入，供前端降级生成摘要） @type {{ text: string, timestamp: number }[]} */
+  /** 实时模式下的转写文本列表（由 App.vue 喂入，供前端降级生成摘要） @type {{ text: string, timestamp: number, start: number|null, end: number|null }[]} */
   liveTranscriptions: [],
+
+  /** 时段摘要结果（独立于段落/全局摘要） @type {{ id: number, label: string, timeRange: string, rawText: string, timestamp: number }[]} */
+  timeRangeSummaries: [],
 });
 
 // ── 脏检测 ──
@@ -175,6 +178,7 @@ function clearAll() {
   state.liveMeetingId = '';
   state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length);
   state.liveTranscriptions.splice(0, state.liveTranscriptions.length);
+  state.timeRangeSummaries.splice(0, state.timeRangeSummaries.length);
   _savedHash = '';
 }
 
@@ -204,13 +208,19 @@ function stopGenerating() {
 
 /**
  * 设置历史回看数据。
- * @param {{ text: string, timestamp: number }[]} transcriptions
+ * @param {{ text: string, timestamp: number, start?: number|null, end?: number|null }[]} transcriptions
  * @param {string} [meetingId]
  */
 function setReviewData(transcriptions, meetingId = '') {
   state.reviewMode = true;
   state.reviewMeetingId = meetingId;
-  state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length, ...transcriptions);
+  const normalized = (transcriptions || []).map((t) => ({
+    text: t.text,
+    timestamp: t.timestamp || 0,
+    start: typeof t.start === 'number' ? t.start : null,
+    end: typeof t.end === 'number' ? t.end : null,
+  }));
+  state.reviewTranscriptions.splice(0, state.reviewTranscriptions.length, ...normalized);
 }
 
 /**
@@ -231,10 +241,116 @@ function setLiveMeetingId(meetingId) {
 
 /**
  * 追加一条实时转写文本。
- * @param {{ text: string, timestamp: number }} entry
+ * @param {{ text: string, timestamp: number, start?: number|null, end?: number|null }} entry
  */
 function addLiveTranscription(entry) {
-  state.liveTranscriptions.push(entry);
+  state.liveTranscriptions.push({
+    text: entry.text,
+    timestamp: entry.timestamp,
+    start: typeof entry.start === 'number' ? entry.start : null,
+    end: typeof entry.end === 'number' ? entry.end : null,
+  });
+}
+
+let nextTimeRangeId = 1;
+
+/** 当前模式下的转写列表（回看用 review，实时用 live）。 */
+const activeTranscriptions = computed(() => {
+  return state.reviewMode ? state.reviewTranscriptions : state.liveTranscriptions;
+});
+
+/**
+ * 归一化转写为会议相对秒（0 基）。优先用后端提供的 start/end；
+ * 缺失时用 epoch 时间戳相对首条推算。
+ * @returns {{ items: { text: string, start: number, end: number }[], duration: number }}
+ */
+function normalizedTranscripts() {
+  const raw = activeTranscriptions.value;
+  if (!raw.length) return { items: [], duration: 0 };
+
+  const hasRelative = raw.some((t) => typeof t.start === 'number');
+  let baseTs = Infinity;
+  for (const t of raw) {
+    if (typeof t.timestamp === 'number' && t.timestamp < baseTs) baseTs = t.timestamp;
+  }
+  if (!Number.isFinite(baseTs)) baseTs = 0;
+
+  const items = raw.map((t) => {
+    let start;
+    let end;
+    if (typeof t.start === 'number') {
+      start = t.start;
+      end = typeof t.end === 'number' ? t.end : t.start;
+    } else {
+      start = Math.max(0, (t.timestamp || baseTs) - baseTs);
+      end = start;
+    }
+    return { text: t.text || '', start, end };
+  });
+
+  let duration = 0;
+  for (const it of items) duration = Math.max(duration, it.end, it.start);
+  // 无相对时间且全部同一时刻时，给一个最小跨度避免滑块塌缩
+  if (!hasRelative && duration <= 0) duration = items.length;
+  return { items, duration };
+}
+
+/**
+ * 取指定会议相对时间区间 [startSec, endSec] 内的转写文本块。
+ * @param {number} startSec
+ * @param {number} endSec
+ * @returns {string}
+ */
+function transcriptTextInRange(startSec, endSec) {
+  const { items } = normalizedTranscripts();
+  const lo = Math.min(startSec, endSec);
+  const hi = Math.max(startSec, endSec);
+  return items
+    .filter((it) => it.end >= lo && it.start <= hi)
+    .map((it) => it.text)
+    .filter((s) => s && s.trim())
+    .join('\n');
+}
+
+/**
+ * 取最接近指定会议相对秒的转写文本（滑块拖动时预览用）。
+ * 优先命中覆盖该秒的转写；否则取中心时间最近的一条。
+ * @param {number} sec
+ * @returns {string}
+ */
+function transcriptAtSec(sec) {
+  const { items } = normalizedTranscripts();
+  if (!items.length) return '';
+  const hit = items.find((it) => sec >= it.start && sec <= it.end);
+  if (hit) return hit.text;
+  let best = items[0];
+  let bestDist = Infinity;
+  for (const it of items) {
+    const center = (it.start + it.end) / 2;
+    const d = Math.abs(center - sec);
+    if (d < bestDist) { bestDist = d; best = it; }
+  }
+  return best.text;
+}
+
+/**
+ * 添加一条时段摘要结果（独立于段落/全局摘要）。
+ * @param {{ label: string, timeRange: string, rawText: string }} data
+ */
+function addTimeRangeSummary(data) {
+  state.timeRangeSummaries.unshift({
+    id: nextTimeRangeId++,
+    label: data.label || '',
+    timeRange: data.timeRange || '',
+    rawText: data.rawText || '',
+    timestamp: Date.now(),
+  });
+}
+
+/** 删除一条时段摘要。 */
+function removeTimeRangeSummary(id) {
+  const idx = state.timeRangeSummaries.findIndex((s) => s.id === id);
+  if (idx !== -1) state.timeRangeSummaries.splice(idx, 1);
 }
 
 /** 所有主题（从所有段落摘要合并去重） */
@@ -357,6 +473,12 @@ export const summaryStore = {
   clearReviewData,
   setLiveMeetingId,
   addLiveTranscription,
+  activeTranscriptions,
+  normalizedTranscripts,
+  transcriptTextInRange,
+  transcriptAtSec,
+  addTimeRangeSummary,
+  removeTimeRangeSummary,
   markSaved,
   getSummariesForSave,
   startGenerating,

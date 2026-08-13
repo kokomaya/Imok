@@ -55,6 +55,7 @@ class ControlAction(str, Enum):
     TRIGGER_GLOBAL_SUMMARY = "trigger_global_summary"  # 手动触发全局摘要
     SET_SUMMARY_INTERVAL = "set_summary_interval"  # 设置自动摘要间隔（秒）
     SET_AUTO_SUMMARY = "set_auto_summary"  # 开关自动定时摘要
+    SET_SUMMARY_TEMPLATE = "set_summary_template"  # 设置会议总结模板（system prompt）
     SET_RECORDING = "set_recording"  # 设置录音开关与静音模式
     SET_ASR_CONFIG = "set_asr_config"  # 设置 ASR/VAD 参数（下次开始识别生效）
 

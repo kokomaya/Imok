@@ -206,6 +206,43 @@ class PromptManager:
         self._templates[name] = PromptTemplate(system=system, user=user)
         logger.info("Prompt template '%s' updated", name)
 
+    def set_summary_system(
+        self,
+        segment_system: str,
+        merge_system: str,
+    ) -> None:
+        """用自定义总结模板覆盖段落/全局总结的 system prompt。
+
+        仅替换 system prompt，保留原有的 user 模板（含 {text}/{time_range}/
+        {existing_summary} 等占位符）。段落 system 会自动追加 {glossary} 占位符，
+        以便术语表注入不受影响。空字符串表示保持系统默认模板。
+        """
+        seg = (segment_system or "").strip()
+        if seg:
+            if "{glossary}" not in seg:
+                seg = seg + "\n\n{glossary}"
+            current = self._templates["summary"]
+            self.set_template("summary", system=seg, user=current.user)
+        else:
+            # 空 → 恢复内置段落总结模板
+            self.set_template(
+                "summary",
+                system=_SUMMARY_SYSTEM_PROMPT,
+                user=_SUMMARY_USER_PROMPT,
+            )
+
+        mrg = (merge_system or "").strip()
+        if mrg:
+            current = self._templates["merge_summary"]
+            self.set_template("merge_summary", system=mrg, user=current.user)
+        else:
+            # 空 → 恢复内置全局合并模板
+            self.set_template(
+                "merge_summary",
+                system=_MERGE_SUMMARY_SYSTEM_PROMPT,
+                user=_MERGE_SUMMARY_USER_PROMPT,
+            )
+
     @property
     def template_names(self) -> list[str]:
         """所有已注册的模板名称。"""

@@ -11,9 +11,11 @@ const fs = require('fs');
 /**
  * 读取 llm_providers.yaml + .env，返回前端可用的 LLM 配置。
  * @param {string} backendRoot - backend 根目录路径
+ * @param {string} [providerName] - 指定 provider 名称；缺省时读取 llm_active.json 覆盖，
+ *                                   再回退到 yaml 的 default_provider
  * @returns {{ ok: boolean, config?: Object, error?: string }}
  */
-function loadLLMConfig(backendRoot) {
+function loadLLMConfig(backendRoot, providerName) {
   try {
     // 1. 读取 .env 到环境变量（简单 key=value 解析）
     const envPath = path.join(backendRoot, '.env');
@@ -52,10 +54,16 @@ function loadLLMConfig(backendRoot) {
       parsed = parseSimpleYaml(yamlContent);
     }
 
-    const defaultName = parsed.default_provider;
-    const provider = parsed.providers?.[defaultName];
+    // 选择 provider：显式指定 > llm_active.json 覆盖 > yaml 默认
+    const activeOverride = providerName || readActiveProvider(backendRoot);
+    let chosenName = parsed.default_provider;
+    if (activeOverride && parsed.providers?.[activeOverride]) {
+      chosenName = activeOverride;
+    }
+
+    const provider = parsed.providers?.[chosenName];
     if (!provider) {
-      return { ok: false, error: `Provider '${defaultName}' not found in config` };
+      return { ok: false, error: `Provider '${chosenName}' not found in config` };
     }
 
     // 3. 解析 API token
@@ -67,6 +75,7 @@ function loadLLMConfig(backendRoot) {
     return {
       ok: true,
       config: {
+        provider: chosenName,
         baseUrl: provider.base_url,
         model: provider.model,
         apiKey,
@@ -78,6 +87,56 @@ function loadLLMConfig(backendRoot) {
     };
   } catch (err) {
     console.error('[llm-config] Failed to load LLM config:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+/** 读取 llm_active.json 中的当前 provider 覆盖（不存在返回空）。 */
+function readActiveProvider(backendRoot) {
+  try {
+    const p = path.join(backendRoot, 'config', 'llm_active.json');
+    if (!fs.existsSync(p)) return '';
+    const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    return typeof data.provider === 'string' ? data.provider : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+/**
+ * 列出所有可用 provider 名称与当前生效 provider。
+ * @param {string} backendRoot
+ * @returns {{ ok: boolean, providers?: Object[], active?: string, defaultProvider?: string, error?: string }}
+ */
+function listLLMProviders(backendRoot) {
+  try {
+    const yamlPath = path.join(backendRoot, 'config', 'llm_providers.yaml');
+    if (!fs.existsSync(yamlPath)) {
+      return { ok: false, error: `Config not found: ${yamlPath}` };
+    }
+    let yaml;
+    try {
+      yaml = require('js-yaml');
+    } catch (_) {
+      yaml = null;
+    }
+    const yamlContent = fs.readFileSync(yamlPath, 'utf-8');
+    const parsed = yaml ? yaml.load(yamlContent) : parseSimpleYaml(yamlContent);
+
+    const defaultProvider = parsed.default_provider || '';
+    const override = readActiveProvider(backendRoot);
+    const providers = Object.entries(parsed.providers || {}).map(([name, p]) => ({
+      name,
+      model: p.model || '',
+      baseUrl: p.base_url || '',
+      isLocal: /localhost|127\.0\.0\.1|ollama/i.test(String(p.base_url || '')),
+    }));
+    const active = (override && providers.some((p) => p.name === override))
+      ? override
+      : defaultProvider;
+
+    return { ok: true, providers, active, defaultProvider };
+  } catch (err) {
     return { ok: false, error: err.message };
   }
 }
@@ -149,4 +208,4 @@ function parseSimpleYaml(content) {
   return result;
 }
 
-module.exports = { loadLLMConfig };
+module.exports = { loadLLMConfig, listLLMProviders };
