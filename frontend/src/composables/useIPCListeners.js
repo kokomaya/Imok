@@ -7,6 +7,7 @@
 import { summaryStore } from '@/stores/summary-store.js';
 import { workspaceStore } from '@/stores/workspace-store.js';
 import { muteAssistStore } from '@/stores/mute-assist-store.js';
+import { asrSettingsStore } from '@/stores/asr-settings-store.js';
 import { expressionService } from '@/services/expression-service.js';
 
 /**
@@ -46,6 +47,10 @@ export function useIPCListeners({ status, meetingActive, meetingStopping, lastMe
 
         if (data.state === 'running' && data.meeting_id) {
           summaryStore.setLiveMeetingId(data.meeting_id);
+        }
+
+        if (data.state === 'running' && data.asr_model) {
+          asrSettingsStore.setEffective(data.asr_model);
         }
 
         if (data.state === 'stopped' && prevActive) {

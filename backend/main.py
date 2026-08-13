@@ -184,6 +184,79 @@ def _create_asr():
     return create_asr()
 
 
+# ASR/VAD 参数取值范围（超出则钳制，非法则忽略该项）
+_ASR_MODEL_SIZES = {"tiny", "base", "small", "medium", "large-v2", "large-v3"}
+_ASR_COMPUTE_TYPES = {"int8", "int8_float16", "float16", "float32"}
+_ASR_DEVICES = {"cpu", "cuda"}
+
+
+def _apply_asr_config(data: dict) -> None:
+    """把前端下发的 ASR/VAD 参数应用到全局配置单例。
+
+    参数在下一次 _start_pipeline() 新建 VAD/ASR 时生效（不影响进行中的会议）。
+    model_size / compute_type / device 收到 "auto"/"" 视为自动检测（None → resolve_with_gpu）。
+    非法值忽略，越界值钳制，保证鲁棒。
+    """
+    from backend.config import get_settings
+
+    logger = logging.getLogger(__name__)
+    update: dict = {}
+
+    def _clamp(name: str, lo: float, hi: float, cast):
+        if name in data and data[name] is not None:
+            try:
+                update[name] = max(lo, min(hi, cast(data[name])))
+            except (TypeError, ValueError):
+                logger.warning("Ignoring invalid ASR config %s=%r", name, data[name])
+
+    _clamp("vad_max_segment_s", 3.0, 30.0, float)
+    _clamp("vad_min_silence_ms", 100, 2000, int)
+    _clamp("vad_threshold", 0.1, 0.9, float)
+    _clamp("beam_size", 1, 10, int)
+
+    if "word_timestamps" in data and data["word_timestamps"] is not None:
+        update["word_timestamps"] = bool(data["word_timestamps"])
+
+    # 枚举/自动型字段：auto/空 → None（走 GPU 自动检测）
+    needs_resolve = False
+    for name, allowed in (
+        ("model_size", _ASR_MODEL_SIZES),
+        ("compute_type", _ASR_COMPUTE_TYPES),
+        ("device", _ASR_DEVICES),
+    ):
+        if name in data:
+            val = data[name]
+            if val in (None, "", "auto"):
+                update[name] = None
+                needs_resolve = True
+            elif val in allowed:
+                update[name] = val
+            else:
+                logger.warning("Ignoring invalid ASR config %s=%r", name, val)
+
+    if "language" in data:
+        val = data["language"]
+        update["language"] = None if val in (None, "", "auto") else str(val)
+
+    if not update:
+        return
+
+    app = get_settings()
+    new_asr = app.asr.model_copy(update=update)
+    # 有字段被重置为 auto(None)，需要重新做 GPU 检测回填 model/compute/device
+    if needs_resolve:
+        new_asr = new_asr.resolve_with_gpu()
+    app.asr = new_asr
+    logger.info(
+        "ASR config applied (effective next start): model=%s device=%s compute=%s "
+        "beam=%d word_ts=%s vad[max=%.1fs min_silence=%dms thr=%.2f] lang=%s",
+        new_asr.model_size, new_asr.device, new_asr.compute_type,
+        new_asr.beam_size, new_asr.word_timestamps,
+        new_asr.vad_max_segment_s, new_asr.vad_min_silence_ms,
+        new_asr.vad_threshold, new_asr.language or "auto",
+    )
+
+
 async def _run_subprocess(source_type: str) -> None:
     """Subprocess 模式 — 作为 Electron 子进程运行。
 
@@ -239,6 +312,9 @@ async def _run_subprocess(source_type: str) -> None:
     recorder = None  # type: Optional[AudioRecorder]
     recording_enabled = False
     recording_mode = "silence"  # 'silence' | 'skip'
+    # 自动摘要设置（跨会议保持，会议启动时应用到新协调器）
+    summary_auto_enabled = True
+    summary_interval_s: float | None = None
     # 持有事件循环引用，供从 reader 线程安全调度协程
     main_loop = asyncio.get_running_loop()
 
@@ -476,6 +552,10 @@ async def _run_subprocess(source_type: str) -> None:
                 if meeting_id is not None:
                     summary_coordinator.on_segment_summary(_on_segment_summary_store)
                     summary_coordinator.on_global_summary(_on_global_summary_store)
+                # 应用跨会议保持的自动摘要设置
+                if summary_interval_s is not None:
+                    summary_coordinator.set_summary_interval(summary_interval_s)
+                summary_coordinator.set_auto_summary(summary_auto_enabled)
                 pl.on_transcription(summary_coordinator.feed_transcription)
                 await summary_coordinator.start()
                 logger.info("Summary coordinator initialized.")
@@ -489,7 +569,10 @@ async def _run_subprocess(source_type: str) -> None:
                 IPCMessage.status(
                     ProcessState.RUNNING,
                     source=src_type,
-                    asr_model=asr._settings.model_size if hasattr(asr, "_settings") else "",
+                    asr_model=(
+                        f"{asr._model_size} ({asr._device})"
+                        if hasattr(asr, "_model_size") else ""
+                    ),
                     meeting_id=meeting_id or "",
                 )
             )
@@ -593,12 +676,20 @@ async def _run_subprocess(source_type: str) -> None:
         elif action == ControlAction.SET_SUMMARY_INTERVAL:
             interval = message.data.get("interval_s")
             if isinstance(interval, (int, float)) and interval > 0:
+                nonlocal summary_interval_s
+                summary_interval_s = float(interval)
                 if summary_coordinator is not None:
                     summary_coordinator.set_summary_interval(float(interval))
                 else:
                     logger.warning("Cannot set summary interval: coordinator not initialized")
             else:
                 writer.write(IPCMessage.error("invalid_interval", f"Invalid interval: {interval}"))
+        elif action == ControlAction.SET_AUTO_SUMMARY:
+            nonlocal summary_auto_enabled
+            summary_auto_enabled = bool(message.data.get("enabled", True))
+            if summary_coordinator is not None:
+                summary_coordinator.set_auto_summary(summary_auto_enabled)
+            logger.info("Auto summary set to %s", summary_auto_enabled)
         elif action == ControlAction.SET_DEVICES:
             nonlocal selected_loopback_device, selected_mic_device
             lb = message.data.get("loopback_device")
@@ -621,6 +712,8 @@ async def _run_subprocess(source_type: str) -> None:
                     recorder.open()
                 recorder.set_muted(not enabled)
             logger.info("Recording set: enabled=%s mode=%s", recording_enabled, recording_mode)
+        elif action == ControlAction.SET_ASR_CONFIG:
+            _apply_asr_config(message.data)
         else:
             logger.warning("Unknown control action: %s", action)
 

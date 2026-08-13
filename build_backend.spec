@@ -116,6 +116,7 @@ a = Analysis(
     excludes=[
         'tkinter', 'matplotlib', 'PIL', 'IPython', 'notebook',
         'pytest', '_pytest',
+        'torch.utils.tensorboard', 'tensorboard',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

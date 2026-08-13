@@ -640,6 +640,32 @@ function setupIPC() {
     }
   });
 
+  // ── ASR / VAD 参数设置（语音识别速度/精度，全局持久化）─────────
+
+  const asrSettingsPath = path.join(BACKEND_ROOT, 'config', 'asr_settings.json');
+
+  ipcMain.handle('asr-settings:get', () => {
+    try {
+      if (!fs.existsSync(asrSettingsPath)) return { ok: true, settings: {} };
+      const data = JSON.parse(fs.readFileSync(asrSettingsPath, 'utf-8'));
+      return { ok: true, settings: data };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('asr-settings:save', (_event, settings) => {
+    try {
+      if (!settings || typeof settings !== 'object') return { ok: false, error: 'Invalid settings' };
+      const tmpPath = asrSettingsPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(settings, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, asrSettingsPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // ── 帮助相关 ─────────────────────────────────────────────
 
   const { getAppInfo } = require('./app-info');

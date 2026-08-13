@@ -61,11 +61,13 @@ class WhisperEngine(ASREngine):
 
     def __init__(self, settings: Optional[ASRSettings] = None) -> None:
         resolved = (settings or ASRSettings()).resolve_with_gpu()
+        self._settings = resolved
         self._model_size: str = resolved.model_size or "medium"
         self._compute_type: str = resolved.compute_type or "int8"
         self._device: str = resolved.device or "cpu"
         self._beam_size: int = resolved.beam_size
         self._language: Optional[str] = resolved.language
+        self._word_timestamps: bool = resolved.word_timestamps
 
         self._model = None  # WhisperModel, lazily loaded
         self._load_lock = threading.Lock()
@@ -110,7 +112,7 @@ class WhisperEngine(ASREngine):
                 audio,
                 beam_size=self._beam_size,
                 language=lang,
-                word_timestamps=True,
+                word_timestamps=self._word_timestamps,
                 vad_filter=False,  # 我们使用独立的 Silero-VAD，不需要内置过滤
                 condition_on_previous_text=False,  # 段间独立，避免错误传播
             )

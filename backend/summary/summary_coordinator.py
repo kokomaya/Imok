@@ -208,6 +208,10 @@ class SummaryCoordinator:
         self._time_window.set_window_duration(clamped)
         logger.info("Summary interval set to %.0fs", clamped)
 
+    def set_auto_summary(self, enabled: bool) -> None:
+        """开关自动定时摘要。关闭后仅在手动触发时生成摘要。"""
+        self._time_window.set_auto_emit(enabled)
+
     async def trigger_segment_summary(self) -> None:
         """手动触发段落摘要 — 刷出当前时间窗口，立即生成段落摘要。"""
         self._time_window.flush()
