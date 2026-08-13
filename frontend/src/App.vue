@@ -24,6 +24,9 @@ import { llmProviderStore } from '@/stores/llm-provider-store.js';
 import { notificationStore } from '@/stores/notification-store.js';
 import { useMeetingHistory } from '@/composables/useMeetingHistory.js';
 import { useIPCListeners } from '@/composables/useIPCListeners.js';
+import { useOfflineTranscript } from '@/composables/useOfflineTranscript.js';
+import { useModelStatus } from '@/composables/useModelStatus.js';
+import { useEnvStatus } from '@/composables/useEnvStatus.js';
 
 const { currentRoute } = useHashRoute();
 
@@ -58,6 +61,22 @@ const loadedMeetingId = ref(null);
 const { checkUnsavedSummary, toggleHistory, loadMeeting, deleteMeeting, backToLive } = useMeetingHistory({
   transcriptions, historyVisible, historyPanelRef, loadedMeetingId,
 });
+
+// ── 录音重解析字幕（回看模式） ──
+const offlineTranscript = useOfflineTranscript({ transcriptions, loadedMeetingId });
+
+// 载入历史会议后，探测/准备离线字幕轨道
+async function onLoadMeeting(meetingId) {
+  await loadMeeting(meetingId);
+  if (loadedMeetingId.value) {
+    await offlineTranscript.onMeetingLoaded(loadedMeetingId.value);
+  }
+}
+
+async function onBackToLive() {
+  await backToLive();
+  offlineTranscript.reset();
+}
 
 /**
  * 根据当前音频开关计算 source_type 参数。
@@ -143,6 +162,7 @@ async function doStartNewMeeting() {
   summaryStore.clearAll();
   workspaceStore.reset();
   loadedMeetingId.value = null;
+  offlineTranscript.reset();
 
   const source = getSourceType();
   await window.electronAPI.sendControl('switch_source', { source });
@@ -283,20 +303,38 @@ const ipcListeners = useIPCListeners({
   showError, handleMenuAction, syncAudioStateToMenu,
 });
 
+let offlineUnbind = null;
+
+// ── 语音模型下载状态（打包发行版模型缺失时提示） ──
+const modelStatus = useModelStatus();
+let modelUnbind = null;
+
+// ── 轻量版运行环境状态（依赖缺失时引导安装） ──
+const envStatus = useEnvStatus();
+let envUnbind = null;
+
 onMounted(async () => {
   if (currentRoute.value !== 'main') return;
   window.addEventListener('beforeunload', onBeforeUnload);
   await ipcListeners.setup();
+  offlineUnbind = offlineTranscript.bind();
+  modelUnbind = modelStatus.bind();
+  envUnbind = envStatus.bind();
   await autoLoadLastMeeting();
   sceneStore.load();
   expressionSettingsStore.load();
   asrSettingsStore.load();
   summaryTemplateStore.load();
   llmProviderStore.load();
+  modelStatus.check();
+  envStatus.check();
 });
 
 onUnmounted(() => {
   ipcListeners.cleanup();
+  offlineUnbind?.();
+  modelUnbind?.();
+  envUnbind?.();
   window.removeEventListener('beforeunload', onBeforeUnload);
 });
 
@@ -467,10 +505,62 @@ function clearTranscriptions() {
       <button class="error-dismiss" @click="dismissError">✕</button>
     </div>
 
+    <!-- 轻量版依赖环境未就绪提示条 -->
+    <div v-if="envStatus.state.checked && !envStatus.state.ready" class="env-bar">
+      <template v-if="envStatus.state.installing">
+        <span class="env-bar-msg">⏳ 正在安装运行依赖（首次较慢，需联网下载数 GB，请耐心等待）…</span>
+        <code v-if="envStatus.state.logLines.length" class="env-bar-log">{{ envStatus.state.logLines[envStatus.state.logLines.length - 1] }}</code>
+      </template>
+      <template v-else>
+        <span class="env-bar-msg">
+          ⚙ 运行依赖尚未安装{{ envStatus.state.missing ? '（缺少 ' + envStatus.state.missing + '）' : '' }}，需安装后才能进行录音与转写。
+        </span>
+        <span v-if="envStatus.state.error" class="env-bar-err">{{ envStatus.state.error }}</span>
+        <button class="btn-install-env" @click="envStatus.install()">一键安装依赖</button>
+      </template>
+    </div>
+
+    <!-- 语音模型未下载提示条 -->
+    <div v-if="modelStatus.state.checked && !modelStatus.state.present" class="model-bar">
+      <span v-if="modelStatus.state.downloading">
+        ⏳ {{ modelStatus.state.message || '正在下载语音模型…' }}（首次下载较大，请保持网络连接）
+      </span>
+      <template v-else>
+        <span>🎙 语音识别模型{{ modelStatus.state.modelSize ? '（' + modelStatus.state.modelSize + '）' : '' }}尚未下载，需下载后才能进行语音转写。</span>
+        <button class="btn-download-model" @click="modelStatus.download()">下载模型</button>
+      </template>
+    </div>
+
     <!-- 回看提示条 -->
     <div v-if="loadedMeetingId" class="review-bar">
       <span>📖 正在回看历史会议: {{ loadedMeetingId }}</span>
-      <button class="btn-back-live" @click="backToLive">返回实时</button>
+
+      <!-- 字幕轨道切换：原字幕 / 录音解析字幕 -->
+      <div v-if="offlineTranscript.hasOffline.value" class="track-switch">
+        <button
+          class="track-btn"
+          :class="{ active: offlineTranscript.activeTrack.value === 'original' }"
+          @click="offlineTranscript.switchTrack('original')"
+        >原字幕</button>
+        <button
+          class="track-btn"
+          :class="{ active: offlineTranscript.activeTrack.value === 'offline' }"
+          @click="offlineTranscript.switchTrack('offline')"
+        >🎙 录音解析</button>
+      </div>
+
+      <!-- 解析进度 -->
+      <span v-if="offlineTranscript.progress.running" class="retranscribe-progress">
+        解析录音中 {{ Math.round(offlineTranscript.progress.ratio * 100) }}%
+      </span>
+      <button
+        v-else
+        class="btn-retranscribe"
+        @click="offlineTranscript.startRetranscribe()"
+        :title="offlineTranscript.hasOffline.value ? '重新解析录音，覆盖已有解析字幕' : '对录音重新解析，生成独立字幕（偏准确性，耗时较长）'"
+      >{{ offlineTranscript.hasOffline.value ? '↻ 重新解析录音' : '🎙 解析录音生成字幕' }}</button>
+
+      <button class="btn-back-live" @click="onBackToLive">返回实时</button>
     </div>
 
     <!-- 历史会议面板 -->
@@ -479,7 +569,7 @@ function clearTranscriptions() {
       :visible="historyVisible"
       :loaded-meeting-id="loadedMeetingId"
       @close="historyVisible = false"
-      @load="loadMeeting"
+      @load="onLoadMeeting"
       @delete="deleteMeeting"
     />
 

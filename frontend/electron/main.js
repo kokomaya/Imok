@@ -73,6 +73,23 @@ const BACKEND_ROOT = IS_DEV
 // ---------------------------------------------------------------
 
 /**
+ * 判定当前运行模式与轻量版 venv 位置。
+ *   dev  : 本地开发（backend/.venv）
+ *   full : PyInstaller 完整打包（含独立 exe）
+ *   lite : 轻量打包（用户自建 resources/.venv）
+ *
+ * @returns {{ mode: 'dev'|'full'|'lite', projectRoot?: string, venvPython?: string }}
+ */
+function getRuntimeMode() {
+  if (IS_DEV) return { mode: 'dev', projectRoot: BACKEND_ROOT };
+  const projectRoot = process.resourcesPath;
+  const exePath = path.resolve(projectRoot, 'python-backend', 'imok-backend.exe');
+  if (fs.existsSync(exePath)) return { mode: 'full', projectRoot };
+  const venvPython = path.resolve(projectRoot, '.venv', 'Scripts', 'python.exe');
+  return { mode: 'lite', projectRoot, venvPython };
+}
+
+/**
  * 解析 Python 可执行文件路径和运行环境（供 execFile 一次性调用）。
  * 根据打包模式自动选择：PyInstaller exe / 系统 python / venv python。
  *
@@ -324,6 +341,75 @@ function setupIPC() {
     });
   });
 
+  // ── 轻量版运行环境检测 / 一键安装依赖 ─────────────────
+
+  // 检测 Python 依赖环境是否就绪（仅轻量版需要用户自建 .venv）
+  ipcMain.handle('env:check', async () => {
+    const info = getRuntimeMode();
+    if (info.mode !== 'lite') {
+      return { ok: true, ready: true, mode: info.mode };
+    }
+    if (!fs.existsSync(info.venvPython)) {
+      return { ok: true, ready: false, mode: 'lite', reason: 'venv_missing' };
+    }
+    const { execFile } = require('child_process');
+    return new Promise((resolve) => {
+      execFile(
+        info.venvPython,
+        ['-c', 'import sounddevice, numpy, faster_whisper, torch'],
+        { timeout: 120000, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
+        (err, _stdout, stderr) => {
+          if (err) {
+            const m = /No module named '([^']+)'/.exec(stderr || '');
+            return resolve({ ok: true, ready: false, mode: 'lite', reason: 'deps_missing', missing: m ? m[1] : null });
+          }
+          resolve({ ok: true, ready: true, mode: 'lite' });
+        },
+      );
+    });
+  });
+
+  // 一键安装轻量版依赖（创建 .venv + pip install），进度流式转发到渲染进程
+  ipcMain.handle('env:install', async (_event, opts) => {
+    const info = getRuntimeMode();
+    if (info.mode !== 'lite') {
+      return { ok: false, error: 'Not a lite build' };
+    }
+    const scriptPath = path.resolve(info.projectRoot, 'scripts', 'install-lite-deps.ps1');
+    if (!fs.existsSync(scriptPath)) {
+      return { ok: false, error: `install script missing: ${scriptPath}` };
+    }
+    const { spawn } = require('child_process');
+    const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath];
+    if (opts && opts.cuda) {
+      args.push('-Cuda', String(opts.cuda));
+    }
+    return new Promise((resolve) => {
+      const child = spawn('powershell', args, {
+        cwd: info.projectRoot,
+        windowsHide: true,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      });
+      const send = (chunk) => {
+        chunk.toString().split(/\r?\n/).forEach((line) => {
+          const trimmed = line.trim();
+          if (trimmed) mainWindow?.webContents.send('python:env-install-progress', { line: trimmed });
+        });
+      };
+      child.stdout.on('data', send);
+      child.stderr.on('data', send);
+      child.on('error', (e) => {
+        mainWindow?.webContents.send('python:env-install-done', { ok: false, error: e.message });
+        resolve({ ok: false, error: e.message });
+      });
+      child.on('close', (code) => {
+        const ok = code === 0;
+        mainWindow?.webContents.send('python:env-install-done', { ok, code });
+        resolve({ ok, code });
+      });
+    });
+  });
+
   // LLM 配置：读取 llm_providers.yaml + .env → 返回给 renderer
   ipcMain.handle('llm:get-config', () => {
     return loadLLMConfig(BACKEND_ROOT);
@@ -536,6 +622,32 @@ function setupIPC() {
       if (!fs.existsSync(dir)) return { ok: false, error: 'Meeting not found' };
       fs.rmSync(dir, { recursive: true, force: true });
       return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // 加载离线重解析字幕（transcriptions_offline.jsonl）
+  ipcMain.handle('meeting:load-offline', (_event, meetingId) => {
+    try {
+      if (!meetingId || typeof meetingId !== 'string') {
+        return { ok: false, error: 'Invalid meeting ID' };
+      }
+      const sanitized = path.basename(meetingId);
+      const dir = path.join(meetingsDir, sanitized);
+      if (!fs.existsSync(dir)) return { ok: false, error: 'Meeting not found' };
+
+      const offlinePath = path.join(dir, 'transcriptions_offline.jsonl');
+      const transcriptions = [];
+      if (fs.existsSync(offlinePath)) {
+        const lines = fs.readFileSync(offlinePath, 'utf-8').split('\n');
+        for (const line of lines) {
+          if (line.trim()) {
+            try { transcriptions.push(JSON.parse(line)); } catch (_) {}
+          }
+        }
+      }
+      return { ok: true, transcriptions };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -837,6 +949,26 @@ function initPythonBridge() {
 
   pythonBridge.on('audio-level', (data) => {
     mainWindow?.webContents.send('python:audio-level', data);
+  });
+
+  pythonBridge.on('retranscribe-progress', (data) => {
+    mainWindow?.webContents.send('python:retranscribe-progress', data);
+  });
+
+  pythonBridge.on('retranscribe-done', (data) => {
+    mainWindow?.webContents.send('python:retranscribe-done', data);
+  });
+
+  pythonBridge.on('model-status', (data) => {
+    mainWindow?.webContents.send('python:model-status', data);
+  });
+
+  pythonBridge.on('model-download-progress', (data) => {
+    mainWindow?.webContents.send('python:model-download-progress', data);
+  });
+
+  pythonBridge.on('model-download-done', (data) => {
+    mainWindow?.webContents.send('python:model-download-done', data);
   });
 
   pythonBridge.on('log', (text) => {

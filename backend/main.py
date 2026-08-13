@@ -317,6 +317,8 @@ async def _run_subprocess(source_type: str) -> None:
     summary_interval_s: float | None = None
     # 自定义总结模板（跨会议保持）：{segment_system, merge_system, section_titles}
     summary_template: dict | None = None
+    # 离线录音重解析是否进行中（避免并发）
+    retranscribe_running = False
     # 持有事件循环引用，供从 reader 线程安全调度协程
     main_loop = asyncio.get_running_loop()
 
@@ -737,6 +739,13 @@ async def _run_subprocess(source_type: str) -> None:
             logger.info("Recording set: enabled=%s mode=%s", recording_enabled, recording_mode)
         elif action == ControlAction.SET_ASR_CONFIG:
             _apply_asr_config(message.data)
+        elif action == ControlAction.RETRANSCRIBE:
+            mid = str(message.data.get("meeting_id", "") or "")
+            asyncio.run_coroutine_threadsafe(_do_retranscribe(mid), main_loop)
+        elif action == ControlAction.CHECK_MODEL:
+            asyncio.run_coroutine_threadsafe(_do_check_model(), main_loop)
+        elif action == ControlAction.DOWNLOAD_MODEL:
+            asyncio.run_coroutine_threadsafe(_do_download_model(), main_loop)
         else:
             logger.warning("Unknown control action: %s", action)
 
@@ -770,6 +779,100 @@ async def _run_subprocess(source_type: str) -> None:
                 pipeline = await _start_pipeline(new_source, resume_meeting_id=resume_meeting_id)
             except Exception:
                 pass
+
+    async def _do_retranscribe(target_meeting_id: str) -> None:
+        """离线重解析指定会议的 recording.wav，生成独立字幕（偏准确性，非实时）。"""
+        nonlocal retranscribe_running
+        if not target_meeting_id:
+            writer.write(IPCMessage.retranscribe_done(
+                target_meeting_id, ok=False, error="缺少会议 ID"))
+            return
+        if pipeline is not None:
+            writer.write(IPCMessage.retranscribe_done(
+                target_meeting_id, ok=False, error="请先结束当前会议再重新解析录音"))
+            return
+        if retranscribe_running:
+            writer.write(IPCMessage.retranscribe_done(
+                target_meeting_id, ok=False, error="已有录音解析任务进行中"))
+            return
+
+        rec_path = meeting_store.get_meeting_dir(target_meeting_id) / "recording.wav"
+        if not rec_path.exists():
+            writer.write(IPCMessage.retranscribe_done(
+                target_meeting_id, ok=False, error="该会议没有可用的录音文件"))
+            return
+
+        retranscribe_running = True
+
+        def _blocking() -> int:
+            from backend.asr.offline import build_offline_engine, retranscribe_recording
+
+            meta = meeting_store.load_meeting(target_meeting_id).meta
+            engine = build_offline_engine()
+
+            def _progress(processed: float, total: float) -> None:
+                writer.write(IPCMessage.retranscribe_progress(
+                    target_meeting_id, processed, total))
+
+            entries = retranscribe_recording(
+                rec_path, engine,
+                started_at=getattr(meta, "started_at", 0.0) or 0.0,
+                progress_cb=_progress,
+            )
+            meeting_store.save_offline_transcriptions(target_meeting_id, entries)
+            return len(entries)
+
+        try:
+            writer.write(IPCMessage.retranscribe_progress(target_meeting_id, 0.0, 0.0))
+            count = await main_loop.run_in_executor(None, _blocking)
+            writer.write(IPCMessage.retranscribe_done(
+                target_meeting_id, ok=True, count=count))
+        except Exception:
+            logger.exception("Re-transcribe failed for %s", target_meeting_id)
+            writer.write(IPCMessage.retranscribe_done(
+                target_meeting_id, ok=False, error="录音解析失败，请查看日志"))
+        finally:
+            retranscribe_running = False
+
+    async def _do_check_model() -> None:
+        """检查语音模型是否已下载 → 回推 MODEL_STATUS。"""
+        def _check():
+            from backend.asr.model_manager import is_model_cached, resolved_model_size
+
+            size = resolved_model_size()
+            return size, is_model_cached(size)
+
+        try:
+            size, present = await main_loop.run_in_executor(None, _check)
+            writer.write(IPCMessage.model_status(size, present))
+        except Exception:
+            logger.exception("Model check failed")
+            writer.write(IPCMessage.model_status("", False))
+
+    async def _do_download_model() -> None:
+        """按需下载语音模型（联网），完成后回推 MODEL_DOWNLOAD_DONE 与最新 MODEL_STATUS。"""
+        def _download():
+            from backend.asr.model_manager import (
+                download_model_files,
+                resolved_model_size,
+            )
+
+            size = resolved_model_size()
+            download_model_files(size)
+            return size
+
+        size = ""
+        try:
+            from backend.asr.model_manager import resolved_model_size
+            size = await main_loop.run_in_executor(None, resolved_model_size)
+            writer.write(IPCMessage.model_download_progress(size, "正在下载语音模型…"))
+            size = await main_loop.run_in_executor(None, _download)
+            writer.write(IPCMessage.model_download_done(size, ok=True))
+            writer.write(IPCMessage.model_status(size, True))
+        except Exception:
+            logger.exception("Model download failed")
+            writer.write(IPCMessage.model_download_done(
+                size, ok=False, error="模型下载失败，请检查网络后重试"))
 
     async def _do_trigger_segment_summary() -> None:
         if summary_coordinator is None:

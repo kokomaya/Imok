@@ -88,8 +88,24 @@ module.exports = {
         target: 'dir',
         arch: ['x64'],
       },
+      {
+        target: 'nsis',
+        arch: ['x64'],
+      },
     ],
     signAndEditExecutable: false,
+  },
+
+  // NSIS 安装器（轻量版体积远小于 2GB，可正常打成安装包）。
+  nsis: {
+    oneClick: false,                          // 显示向导，允许选择安装目录
+    perMachine: false,                        // 按当前用户安装，无需管理员
+    allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    shortcutName: 'Imok Meeting Assistant',
+    // 文件名避免空格，便于分发
+    artifactName: 'ImokMeetingAssistant-${version}-lite-setup.${ext}',
   },
 
   mac: {

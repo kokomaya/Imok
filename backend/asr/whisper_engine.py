@@ -178,6 +178,54 @@ class WhisperEngine(ASREngine):
                 duration_s=duration_s,
             )
 
+    def transcribe_stream(
+        self,
+        audio: np.ndarray,
+        language: Optional[str] = None,
+        *,
+        condition_on_previous_text: bool = True,
+        vad_filter: bool = True,
+    ):
+        """流式转写整段音频，逐句 yield TranscriptionSegment（离线重解析用）。
+
+        与 transcribe() 不同：直接暴露 faster-whisper 的段生成器，
+        便于对长录音上报进度；默认开启内置 VAD 过滤与上下文条件，偏向准确性。
+
+        Args:
+            audio: mono float32, 16kHz。
+            language: 覆盖默认语言；None 自动检测。
+            condition_on_previous_text: 段间是否携带上下文（离线偏准确设 True）。
+            vad_filter: 是否启用 faster-whisper 内置 VAD 过滤静音。
+
+        Yields:
+            TranscriptionSegment
+        """
+        self._ensure_loaded()
+        lang = language or self._language or self._cached_language
+        segments_iter, _info = self._model.transcribe(
+            audio,
+            beam_size=self._beam_size,
+            language=lang,
+            word_timestamps=self._word_timestamps,
+            vad_filter=vad_filter,
+            condition_on_previous_text=condition_on_previous_text,
+        )
+        for seg in segments_iter:
+            words = [
+                WordSegment(
+                    word=w.word, start=w.start, end=w.end, probability=w.probability
+                )
+                for w in (seg.words or [])
+            ]
+            yield TranscriptionSegment(
+                text=seg.text.strip(),
+                start=seg.start,
+                end=seg.end,
+                words=words,
+                avg_logprob=seg.avg_logprob,
+                no_speech_prob=seg.no_speech_prob,
+            )
+
     def get_supported_languages(self) -> List[str]:
         return list(_SUPPORTED_LANGUAGES)
 

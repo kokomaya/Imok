@@ -34,11 +34,14 @@ const INVOKE_CHANNELS = [
   'llm:chat-stream',
   'meeting:list',
   'meeting:load',
+  'meeting:load-offline',
   'meeting:delete',
   'meeting:save-summaries',
   'meeting:save-transcriptions',
   'audio:list-devices',
   'audio:test-device',
+  'env:check',
+  'env:install',
   'scenes:list',
   'scenes:save',
   'expression-settings:get',
@@ -65,6 +68,13 @@ const RECEIVE_CHANNELS = [
   'python:segment-summary',
   'python:global-summary',
   'python:audio-level',
+  'python:retranscribe-progress',
+  'python:retranscribe-done',
+  'python:model-status',
+  'python:model-download-progress',
+  'python:model-download-done',
+  'python:env-install-progress',
+  'python:env-install-done',
   'mute-panel:toggle',
   'menu:action',
   'llm:chat-stream-chunk',
@@ -230,6 +240,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /**
+   * 加载指定会议的离线重解析字幕（独立于实时字幕）。
+   * @param {string} meetingId
+   * @returns {Promise<{ ok: boolean, transcriptions?: Array, error?: string }>}
+   */
+  loadOfflineTranscript: (meetingId) => {
+    return ipcRenderer.invoke('meeting:load-offline', meetingId);
+  },
+
+  /**
    * 删除指定会议。
    * @param {string} meetingId
    * @returns {Promise<{ ok: boolean, error?: string }>}
@@ -303,6 +322,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   setLLMProvider: (providerName) => {
     return ipcRenderer.invoke('llm:set-provider', providerName);
+  },
+
+  // ── 轻量版运行环境 ──
+
+  /**
+   * 检测 Python 依赖环境是否就绪。
+   * @returns {Promise<{ ok: boolean, ready: boolean, mode: string, reason?: string, missing?: string }>}
+   */
+  checkEnv: () => {
+    return ipcRenderer.invoke('env:check');
+  },
+
+  /**
+   * 一键安装轻量版依赖（创建 .venv + pip install）。
+   * @param {{ cuda?: string }} [opts]
+   * @returns {Promise<{ ok: boolean, code?: number, error?: string }>}
+   */
+  installEnv: (opts) => {
+    return ipcRenderer.invoke('env:install', opts);
   },
 
   // ── 帮助 ──

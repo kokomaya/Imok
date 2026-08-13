@@ -40,6 +40,7 @@ _META_FILE = "meta.json"
 _TRANSCRIPTIONS_FILE = "transcriptions.jsonl"
 _SUMMARIES_FILE = "summaries.json"
 _SPEAKERS_FILE = "speakers.json"
+_OFFLINE_TRANSCRIPTIONS_FILE = "transcriptions_offline.jsonl"
 
 
 class MeetingStore:
@@ -192,6 +193,42 @@ class MeetingStore:
     def get_meeting_dir(self, meeting_id: str) -> Path:
         """获取会议文件夹路径。"""
         return self._meeting_dir(meeting_id)
+
+    # ── 离线重解析字幕（独立于 transcriptions.jsonl）────────────
+
+    def save_offline_transcriptions(
+        self, meeting_id: str, entries: List[TranscriptionEntry]
+    ) -> None:
+        """全量写入离线重解析字幕到 transcriptions_offline.jsonl（线程安全）。"""
+        file_path = self._meeting_dir(meeting_id) / _OFFLINE_TRANSCRIPTIONS_FILE
+        tmp = file_path.with_suffix(".jsonl.tmp")
+        with self._lock:
+            with open(tmp, "w", encoding="utf-8") as f:
+                for e in entries:
+                    f.write(json.dumps(e.to_dict(), ensure_ascii=False) + "\n")
+            tmp.replace(file_path)
+        logger.info(
+            "Saved %d offline transcriptions for meeting %s", len(entries), meeting_id
+        )
+
+    def load_offline_transcriptions(
+        self, meeting_id: str
+    ) -> List[TranscriptionEntry]:
+        """读取离线重解析字幕（不存在返回空列表）。"""
+        path = self._meeting_dir(meeting_id) / _OFFLINE_TRANSCRIPTIONS_FILE
+        if not path.exists():
+            return []
+        entries: List[TranscriptionEntry] = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(TranscriptionEntry.from_dict(json.loads(line)))
+                except Exception:
+                    logger.warning("Skipped invalid offline transcription line")
+        return entries
 
     # ── 内部方法 ──────────────────────────────────────────────
 

@@ -28,6 +28,11 @@ class MessageType(str, Enum):
     SEGMENT_SUMMARY = "segment_summary"  # 段落摘要
     GLOBAL_SUMMARY = "global_summary"  # 全局会议总结
     AUDIO_LEVEL = "audio_level"  # 实时音频电平
+    RETRANSCRIBE_PROGRESS = "retranscribe_progress"  # 录音重解析进度
+    RETRANSCRIBE_DONE = "retranscribe_done"  # 录音重解析完成
+    MODEL_STATUS = "model_status"  # 语音模型本地存在性
+    MODEL_DOWNLOAD_PROGRESS = "model_download_progress"  # 模型下载中
+    MODEL_DOWNLOAD_DONE = "model_download_done"  # 模型下载完成
 
     # Electron → Python (stdin)
     CONTROL = "control"  # 控制命令
@@ -58,6 +63,9 @@ class ControlAction(str, Enum):
     SET_SUMMARY_TEMPLATE = "set_summary_template"  # 设置会议总结模板（system prompt）
     SET_RECORDING = "set_recording"  # 设置录音开关与静音模式
     SET_ASR_CONFIG = "set_asr_config"  # 设置 ASR/VAD 参数（下次开始识别生效）
+    RETRANSCRIBE = "retranscribe"  # 对已结束会议的录音重新解析生成独立字幕
+    CHECK_MODEL = "check_model"  # 检查语音模型是否已下载
+    DOWNLOAD_MODEL = "download_model"  # 下载语音模型
 
 
 @dataclass
@@ -222,6 +230,72 @@ class IPCMessage:
         """创建错误消息。"""
         data = ErrorData(code=code, message=message)
         return cls(type=MessageType.ERROR, data=asdict(data))
+
+    @classmethod
+    def retranscribe_progress(
+        cls, meeting_id: str, processed: float, total: float
+    ) -> "IPCMessage":
+        """创建录音重解析进度消息。"""
+        ratio = (processed / total) if total > 0 else 0.0
+        return cls(
+            type=MessageType.RETRANSCRIBE_PROGRESS,
+            data={
+                "meeting_id": meeting_id,
+                "processed": round(float(processed), 2),
+                "total": round(float(total), 2),
+                "ratio": round(min(max(ratio, 0.0), 1.0), 4),
+            },
+        )
+
+    @classmethod
+    def retranscribe_done(
+        cls,
+        meeting_id: str,
+        *,
+        ok: bool,
+        count: int = 0,
+        error: str = "",
+    ) -> "IPCMessage":
+        """创建录音重解析完成消息。"""
+        return cls(
+            type=MessageType.RETRANSCRIBE_DONE,
+            data={
+                "meeting_id": meeting_id,
+                "ok": bool(ok),
+                "count": int(count),
+                "error": error,
+            },
+        )
+
+    @classmethod
+    def model_status(
+        cls, model_size: str, present: bool
+    ) -> "IPCMessage":
+        """创建语音模型本地存在性消息。"""
+        return cls(
+            type=MessageType.MODEL_STATUS,
+            data={"model_size": model_size, "present": bool(present)},
+        )
+
+    @classmethod
+    def model_download_progress(
+        cls, model_size: str, message: str = ""
+    ) -> "IPCMessage":
+        """创建模型下载进度（不确定进度）消息。"""
+        return cls(
+            type=MessageType.MODEL_DOWNLOAD_PROGRESS,
+            data={"model_size": model_size, "message": message},
+        )
+
+    @classmethod
+    def model_download_done(
+        cls, model_size: str, *, ok: bool, error: str = ""
+    ) -> "IPCMessage":
+        """创建模型下载完成消息。"""
+        return cls(
+            type=MessageType.MODEL_DOWNLOAD_DONE,
+            data={"model_size": model_size, "ok": bool(ok), "error": error},
+        )
 
     @classmethod
     def control(cls, action: ControlAction, *, source: str = "") -> "IPCMessage":

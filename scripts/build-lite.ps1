@@ -126,6 +126,15 @@ try {
 
     $unpackedSize = [math]::Round(((Get-ChildItem $unpackedDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
     Write-Host "  Portable app: out-lite\win-unpacked\ ($unpackedSize MB)" -ForegroundColor Green
+
+    # NSIS 安装器（由 nsis target 生成）
+    $setupExe = Join-Path $FrontendDir 'out-lite\ImokMeetingAssistant-0.1.0-lite-setup.exe'
+    if (Test-Path $setupExe) {
+        $setupSize = [math]::Round((Get-Item $setupExe).Length / 1MB, 1)
+        Write-Host "  Installer: out-lite\ImokMeetingAssistant-0.1.0-lite-setup.exe ($setupSize MB)" -ForegroundColor Green
+    } else {
+        Write-Host '  Warning: NSIS installer not found (check electron-builder output).' -ForegroundColor Yellow
+    }
 } finally {
     Pop-Location
 }
@@ -154,7 +163,8 @@ if (Test-Path $zipPath) {
 # ── Step 6: 报告 ────────────────────────────────────────
 
 Write-Host "`n[6/6] Lite build complete!" -ForegroundColor Green
-Write-Host "`n  Portable app : frontend\out-lite\win-unpacked\" -ForegroundColor Cyan
+Write-Host "`n  Installer    : frontend\out-lite\ImokMeetingAssistant-0.1.0-lite-setup.exe" -ForegroundColor Cyan
+Write-Host "  Portable app : frontend\out-lite\win-unpacked\" -ForegroundColor Cyan
 Write-Host "  Zip package  : frontend\out-lite\ImokMeetingAssistant-0.1.0-lite-win-x64.zip" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Users must install Python environment before running." -ForegroundColor Yellow

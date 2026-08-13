@@ -657,10 +657,10 @@
   border-radius: 2px;
 }
 
-/* 拖动时在对应滑块上方悬浮的字幕预览气泡 */
+/* 拖动时在对应滑块下方悬浮的字幕预览气泡（放下方避免被上方容器裁切） */
 .range-preview-popup {
   position: absolute;
-  bottom: calc(100% + 8px);
+  top: calc(100% + 8px);
   transform: translateX(-50%);
   max-width: 260px;
   min-width: 120px;
@@ -676,11 +676,11 @@
 .range-preview-popup::after {
   content: '';
   position: absolute;
-  top: 100%;
+  bottom: 100%;
   left: 50%;
   transform: translateX(-50%);
   border: 5px solid transparent;
-  border-top-color: #263238;
+  border-bottom-color: #263238;
 }
 
 .range-preview-time {

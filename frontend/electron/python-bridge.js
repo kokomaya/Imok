@@ -281,6 +281,21 @@ class PythonBridge extends EventEmitter {
       case 'audio_level':
         this.emit('audio-level', data);
         break;
+      case 'retranscribe_progress':
+        this.emit('retranscribe-progress', data);
+        break;
+      case 'retranscribe_done':
+        this.emit('retranscribe-done', data);
+        break;
+      case 'model_status':
+        this.emit('model-status', data);
+        break;
+      case 'model_download_progress':
+        this.emit('model-download-progress', data);
+        break;
+      case 'model_download_done':
+        this.emit('model-download-done', data);
+        break;
       default:
         this.emit('message', message);
     }
