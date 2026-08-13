@@ -95,6 +95,9 @@ class TimeWindowManager:
         self._window_start: float = 0.0
         self._window_end: float = window_duration_s
 
+        # 是否按时间窗口自动触发摘要。关闭时仅累积文本，等待手动 flush()。
+        self._auto_emit: bool = True
+
     def on_window_complete(self, callback: WindowCallback) -> None:
         """注册窗口完成回调。"""
         self._callbacks.append(callback)
@@ -129,7 +132,7 @@ class TimeWindowManager:
             return
 
         # 如果这条记录的开始时间超出当前窗口，先完成当前窗口
-        while end_time > self._window_end and self._entries:
+        while self._auto_emit and end_time > self._window_end and self._entries:
             self._emit_window()
 
         self._entries.append(entry)
@@ -156,6 +159,20 @@ class TimeWindowManager:
         # 调整当前窗口结束点（从当前窗口起点重新计算）
         self._window_end = self._window_start + duration_s
         logger.info("Window duration updated to %.0fs", duration_s)
+
+    def set_auto_emit(self, enabled: bool) -> None:
+        """开关按时间窗口自动触发摘要。
+
+        关闭后 add() 不再按时长自动切窗，文本持续累积，直到手动 flush()。
+        重新开启时以最后一条记录的时间为基准重置窗口边界，避免积压内容被一次性
+        拆成多个窗口连续触发。
+        """
+        if enabled and not self._auto_emit:
+            last_end = self._entries[-1].end_time if self._entries else self._window_start
+            self._window_start = last_end
+            self._window_end = last_end + self._window_duration
+        self._auto_emit = enabled
+        logger.info("Time window auto-emit set to %s", enabled)
 
     @property
     def window_index(self) -> int:

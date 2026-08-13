@@ -5,6 +5,7 @@ import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { MuteAssistPanel } from '@/components/MuteAssistPanel';
 import { SummaryPanel } from '@/components/SummaryPanel';
 import { AudioDevicePanel } from '@/components/AudioDevicePanel';
+import { AsrSettingsPanel } from '@/components/AsrSettingsPanel';
 import { HistoryPanel } from '@/components/HistoryPanel';
 import { HelpDialog } from '@/components/HelpDialog';
 import { TranscriptionPanel } from '@/components/TranscriptionPanel';
@@ -16,6 +17,7 @@ import { subtitleStore } from '@/stores/subtitle-store.js';
 import { helpStore } from '@/stores/help-store.js';
 import { sceneStore } from '@/stores/scene-store.js';
 import { expressionSettingsStore } from '@/stores/expression-settings-store.js';
+import { asrSettingsStore } from '@/stores/asr-settings-store.js';
 import { notificationStore } from '@/stores/notification-store.js';
 import { useMeetingHistory } from '@/composables/useMeetingHistory.js';
 import { useIPCListeners } from '@/composables/useIPCListeners.js';
@@ -45,6 +47,7 @@ function dismissError() {
 // ── 会议历史 ──
 const historyVisible = ref(false);
 const devicePanelVisible = ref(false);
+const asrPanelVisible = ref(false);
 const historyPanelRef = ref(null);
 const loadedMeetingId = ref(null);
 
@@ -280,6 +283,7 @@ onMounted(async () => {
   await autoLoadLastMeeting();
   sceneStore.load();
   expressionSettingsStore.load();
+  asrSettingsStore.load();
 });
 
 onUnmounted(() => {
@@ -403,6 +407,13 @@ function clearTranscriptions() {
           title="音频设备监控"
         >🎛</button>
 
+        <button
+          class="btn-icon"
+          :class="{ active: asrPanelVisible }"
+          @click="asrPanelVisible = !asrPanelVisible"
+          title="语音识别设置（速度/精度）"
+        >🎚</button>
+
         <span class="header-sep"></span>
 
         <!-- 全局保存 -->
@@ -460,6 +471,12 @@ function clearTranscriptions() {
     <AudioDevicePanel
       :visible="devicePanelVisible"
       @close="devicePanelVisible = false"
+    />
+
+    <!-- 语音识别设置面板 -->
+    <AsrSettingsPanel
+      :visible="asrPanelVisible"
+      @close="asrPanelVisible = false"
     />
 
     <main class="content">

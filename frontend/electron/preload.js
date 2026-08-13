@@ -43,6 +43,8 @@ const INVOKE_CHANNELS = [
   'scenes:save',
   'expression-settings:get',
   'expression-settings:save',
+  'asr-settings:get',
+  'asr-settings:save',
   'app:info',
   'app:help-doc',
   'shell:open-external',
@@ -267,6 +269,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   saveExpressionSettings: (settings) => {
     return ipcRenderer.invoke('expression-settings:save', settings);
+  },
+
+  // ── ASR / VAD 参数设置 ──
+
+  getAsrSettings: () => {
+    return ipcRenderer.invoke('asr-settings:get');
+  },
+
+  saveAsrSettings: (settings) => {
+    return ipcRenderer.invoke('asr-settings:save', settings);
   },
 
   // ── 帮助 ──

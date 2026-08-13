@@ -196,6 +196,23 @@ try {
 
     $unpackedSize = [math]::Round(((Get-ChildItem $unpackedDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1GB), 2)
     Write-Host "  Portable app: out\win-unpacked\ ($unpackedSize GB)" -ForegroundColor Green
+
+    Write-Host '  Copying runtime config files (.env and llm_providers.yaml)...' -ForegroundColor DarkGray
+    $resourcesDir = Join-Path $unpackedDir 'resources'
+    $resourcesConfigDir = Join-Path $resourcesDir 'config'
+    New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $resourcesConfigDir | Out-Null
+
+    if (-not (Test-Path $envFile)) {
+        Write-Error '.env not found — cannot copy runtime env file'
+    }
+    if (-not (Test-Path $yamlFile)) {
+        Write-Error 'config/llm_providers.yaml not found — cannot copy runtime provider config'
+    }
+
+    Copy-Item -Path $envFile -Destination (Join-Path $resourcesDir '.env') -Force
+    Copy-Item -Path $yamlFile -Destination (Join-Path $resourcesConfigDir 'llm_providers.yaml') -Force
+    Write-Host '  Runtime config copied to out\win-unpacked\resources\ and resources\config\' -ForegroundColor Green
 } finally {
     Pop-Location
 }

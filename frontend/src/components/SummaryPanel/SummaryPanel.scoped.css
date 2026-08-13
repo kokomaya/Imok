@@ -80,6 +80,43 @@
   cursor: not-allowed;
 }
 
+.auto-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 3px 9px;
+  border: 1px solid #ccc;
+  border-radius: 12px;
+  background: #fff;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.auto-toggle:hover {
+  border-color: #90caf9;
+}
+
+.auto-toggle.on {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  color: #2e7d32;
+}
+
+.auto-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #bbb;
+  transition: background 0.15s;
+}
+
+.auto-toggle.on .auto-dot {
+  background: #43a047;
+}
+
 .interval-label {
   display: inline-flex;
   align-items: center;

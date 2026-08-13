@@ -203,6 +203,23 @@ try {
 
     $unpackedSize = [math]::Round(((Get-ChildItem $unpackedDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1GB), 2)
     Write-Host "  Portable app: out\win-unpacked\ ($unpackedSize GB)" -ForegroundColor Green
+
+    Write-Host '  Copying runtime config files (.env and llm_providers.yaml)...' -ForegroundColor DarkGray
+    $resourcesDir = Join-Path $unpackedDir 'resources'
+    $resourcesConfigDir = Join-Path $resourcesDir 'config'
+    New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $resourcesConfigDir | Out-Null
+
+    if (-not (Test-Path $envFile)) {
+        Write-Error '.env not found — cannot copy runtime env file'
+    }
+    if (-not (Test-Path $yamlFile)) {
+        Write-Error 'config/llm_providers.yaml not found — cannot copy runtime provider config'
+    }
+
+    Copy-Item -Path $envFile -Destination (Join-Path $resourcesDir '.env') -Force
+    Copy-Item -Path $yamlFile -Destination (Join-Path $resourcesConfigDir 'llm_providers.yaml') -Force
+    Write-Host '  Runtime config copied to out\win-unpacked\resources\ and resources\config\' -ForegroundColor Green
 } finally {
     Pop-Location
 }
@@ -233,5 +250,4 @@ if (Test-Path $zipPath) {
 Write-Host "`n[7/7] Build complete!" -ForegroundColor Green
 Write-Host "`n  Portable app : frontend\out\win-unpacked\" -ForegroundColor Cyan
 Write-Host "  Zip package  : frontend\out\ImokMeetingAssistant-0.1.0-win-x64.zip" -ForegroundColor Cyan
-Write-Host "  Note: Users need to create .env and config\llm_providers.yaml" -ForegroundColor Yellow
-Write-Host "        from the included .example files.`n" -ForegroundColor Yellow
+Write-Host "  Runtime config copied to: resources\\.env and resources\\config\\llm_providers.yaml`n" -ForegroundColor Yellow

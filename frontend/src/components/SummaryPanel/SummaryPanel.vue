@@ -22,6 +22,7 @@ import EditableField from '@/components/common/EditableField.vue';
 const triggeringSegment = ref(false);
 const triggeringGlobal = ref(false);
 const summaryInterval = ref(600);
+const autoSummary = ref(true);
 
 const INTERVAL_OPTIONS = [
   { label: '20分钟', value: 1200 },
@@ -50,6 +51,23 @@ async function onIntervalChange(event) {
     await window.electronAPI.sendControl('set_summary_interval', { interval_s: val });
   }
 }
+
+async function onToggleAutoSummary() {
+  autoSummary.value = !autoSummary.value;
+  if (window.electronAPI) {
+    await window.electronAPI.sendControl('set_auto_summary', { enabled: autoSummary.value });
+  }
+}
+
+// 会议启动时把当前自动摘要设置同步到后端（后端每场会议会新建协调器）
+watch(
+  () => summaryStore.state.liveMeetingId,
+  async (meetingId) => {
+    if (!meetingId || !window.electronAPI) return;
+    await window.electronAPI.sendControl('set_summary_interval', { interval_s: summaryInterval.value });
+    await window.electronAPI.sendControl('set_auto_summary', { enabled: autoSummary.value });
+  },
+);
 
 async function triggerSegmentSummary() {
   if (triggeringSegment.value) return;
@@ -235,7 +253,17 @@ function onEditActionItem(index, field, value) {
         <span class="panel-title">📋 会议摘要</span>
       </div>
       <div class="header-right">
-        <label v-if="!summaryStore.state.reviewMode" class="interval-label" title="自动摘要间隔（60秒 ~ 20分钟）">
+        <button
+          v-if="!summaryStore.state.reviewMode"
+          class="auto-toggle"
+          :class="{ on: autoSummary }"
+          @click="onToggleAutoSummary"
+          :title="autoSummary ? '自动定时摘要：开（点击关闭，改为手动触发）' : '自动定时摘要：关（点击开启定时）'"
+        >
+          <span class="auto-dot"></span>
+          {{ autoSummary ? '自动摘要' : '手动摘要' }}
+        </button>
+        <label v-if="!summaryStore.state.reviewMode && autoSummary" class="interval-label" title="自动摘要间隔（60秒 ~ 20分钟）">
           ⏱
           <select class="interval-select" :value="summaryInterval" @change="onIntervalChange">
             <option
